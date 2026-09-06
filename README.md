@@ -131,7 +131,9 @@ Sprites are discovered off disk by filename, so dropping a new GIF into a Bit's
 `read` → the "thinking" state while waiting on a reply
 
 A state with no matching file falls back to `idle`. Only the Wizard snaps; the
-Bit he summons simply arrives.
+Bit he summons simply arrives — and it arrives on the BAM, once his cast has
+played out in full. The wait is read off the GIF rather than guessed, so
+replacing the art changes the timing with it.
 
 ## Voices
 

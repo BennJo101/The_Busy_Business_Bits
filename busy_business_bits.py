@@ -172,6 +172,15 @@ class Animator:
         cls._cache[key] = (frames, durations)
         return frames, durations
 
+    def total_ms(self, path):
+        """How long this state runs end to end. The Wizard's cast is 49 frames;
+        anything that wants to wait for it has to ask rather than guess."""
+        try:
+            _, durations = self._load(path, self.size)
+            return sum(durations)
+        except Exception:
+            return 0
+
     def play(self, path, restart=False):
         # restart=True replays a state that's already on screen - the Wizard's
         # snap has to fire again even if he's mid-snap from the last summon
@@ -504,10 +513,16 @@ class Console(tk.Frame):
                         text=(("> " if on else "  ") + SHORT[name]).ljust(16))
 
     def wizard_flourish(self, states):
-        """The spell-cast snap, sparkles and all, then back to idle."""
+        """The spell-cast snap, sparkles and all, then back to idle.
+
+        Returns how long the cast runs, so the caller can hold anything that is
+        meant to happen at the end of it. This used to settle back to idle after
+        a flat 1100ms while the cast itself is 4900 - the sparkles never got on
+        screen at all.
+        """
         snap = states.get("snap")
         if not snap:
-            return
+            return 0
         idle = states.get("idle")
         if self._flourish_job:
             try:
@@ -515,7 +530,9 @@ class Console(tk.Frame):
             except Exception:
                 pass
         self.wiz_anim.play(snap, restart=True)
-        self._flourish_job = self.after(1100, lambda: self._end_flourish(idle))
+        ms = self.wiz_anim.total_ms(snap) or 1100
+        self._flourish_job = self.after(ms, lambda: self._end_flourish(idle))
+        return ms
 
     def _end_flourish(self, idle):
         self._flourish_job = None
@@ -536,6 +553,7 @@ class App:
         self.busy = False
         self._slot = 0
         self.results = queue.Queue()
+        self._pending = {}          # summoned, mid-cast, not yet on screen
         try:
             self.ambient = bits_ambient.Ambient() if bits_ambient else None
         except Exception:                                         # noqa: BLE001
@@ -567,13 +585,13 @@ class App:
 
     # -- summoning ----------------------------------------------------------
     def toggle(self, name):
-        if name in self.windows:
+        if name in self.windows or name in self._pending:
             self.dismiss(name)
         else:
             self.summon(name)
 
     def summon(self, name):
-        if (name == HOST or name in self.windows
+        if (name == HOST or name in self.windows or name in self._pending
                 or not self.sprites.get(name, {}).get("idle")):
             return
         n = self._slot
@@ -595,14 +613,32 @@ class App:
         y = 30 + (cell // cols) * vstep + lap * 26
         x = min(x, max(20, sx - CARD - 20))
         y = min(y, max(20, sy - 200))
-        w = BitWindow(self, name, x, y)
-        self.windows[name] = w
+        # The Wizard casts first and the Bit arrives on the BAM at the end of
+        # it - so the whole snap and its sparkles play out before anything
+        # appears. The arrival is timed off the App rather than the console's
+        # own settle-to-idle job, because a second summon cancels that job and
+        # would otherwise strand the first Bit mid-cast, never arriving.
+        self._pending[name] = (x, y)
         self.console.set_active(name, True)
-        self.console.wizard_flourish(self.sprites.get("The Wizard", {}))
+        self.console.room_sys("The Wizard begins the summoning of %s..." % SHORT[name])
+        ms = self.console.wizard_flourish(self.sprites.get("The Wizard", {}))
+        self.root.after(max(0, ms), lambda: self._land(name))
+
+    def _land(self, name):
+        """The BAM. Called once the Wizard's cast has finished."""
+        xy = self._pending.pop(name, None)
+        if xy is None or name in self.windows:
+            return                  # dismissed or cancelled mid-cast
+        self.windows[name] = BitWindow(self, name, xy[0], xy[1])
         self.console.room_sys("Okay... BAM! %s is in." % SHORT[name])
         self._speak_line("The Wizard", "Okay... BAM!", to_window=False)
 
     def dismiss(self, name):
+        if name in self._pending:                 # still mid-cast; call it off
+            self._pending.pop(name, None)
+            self.console.set_active(name, False)
+            self.console.room_sys("%s never arrived." % SHORT[name])
+            return
         w = self.windows.pop(name, None)
         if w:
             w.destroy()
@@ -612,7 +648,7 @@ class App:
             self._slot = 0
 
     def dismiss_all(self):
-        for n in list(self.windows):
+        for n in list(self.windows) + list(self._pending):
             self.dismiss(n)
 
     def present(self):
