@@ -1,0 +1,12 @@
+{
+	"nodes":[
+		{"id":"a5a00deb91abca23","x":131,"y":78,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Reaper Files/GIFs and PNG/Reaper_idle_loop.gif"},
+		{"id":"72b37e89a272dbf7","x":576,"y":78,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Reaper Files/GIFs and PNG/Reaper_snap_loop.gif"},
+		{"id":"3bec16e7647214db","x":1021,"y":78,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Reaper Files/GIFs and PNG/Reaper_snap_talk_loop.gif"},
+		{"id":"6efd2379d26c4d37","x":1466,"y":78,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Reaper Files/GIFs and PNG/Reaper_swing_loop.gif"},
+		{"id":"550407cca6be9451","x":1911,"y":78,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Reaper Files/GIFs and PNG/Reaper_talk_loop.gif"},
+		{"id":"eca983bee3e0c48c","type":"file","file":"The Busy Business Bits Project/The Bits/The Reaper Files/Program Versions.md","x":576,"y":-398,"width":400,"height":400},
+		{"id":"ecbf4a59ff353c30","type":"file","file":"The Busy Business Bits Project/The Bits/The Reaper Files/The Reaper.md","x":131,"y":-398,"width":400,"height":400}
+	],
+	"edges":[]
+}

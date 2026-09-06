@@ -1,0 +1,12 @@
+{
+	"nodes":[
+		{"type":"file","file":"The Busy Business Bits Project/The Bits/The Boss Files/GIFs and PNG/The Boss.png","id":"7633e57d9137ac83","x":-960,"y":156,"width":400,"height":400},
+		{"type":"file","file":"The Busy Business Bits Project/The Bits/The Boss Files/The Boss.md","id":"3ae115fa96517b3c","x":-912,"y":-600,"width":552,"height":600},
+		{"type":"file","file":"The Busy Business Bits Project/The Bits/The Boss Files/Program Versions.md","id":"fc9c7d82ffd29a96","x":-312,"y":-596,"width":725,"height":592},
+		{"type":"file","file":"The Busy Business Bits Project/The Bits/The Boss Files/GIFs and PNG/Boss_snap_loop.gif","id":"8a694941138a38ef","x":380,"y":156,"width":400,"height":400},
+		{"type":"file","file":"The Busy Business Bits Project/The Bits/The Boss Files/GIFs and PNG/Boss_snap_talk_loop.gif","id":"8f85d6403be730e8","x":820,"y":156,"width":400,"height":400},
+		{"type":"file","file":"The Busy Business Bits Project/The Bits/The Boss Files/GIFs and PNG/Boss_idle_loop.gif","id":"f62aed057a4413d9","x":-512,"y":156,"width":400,"height":400},
+		{"id":"09a765a30cc12700","x":-60,"y":156,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Boss Files/GIFs and PNG/Boss_talk_loop.gif"}
+	],
+	"edges":[]
+}

@@ -1,0 +1,35 @@
+# Virtual environment
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Editor / tooling config
+.claude/
+.vscode/
+.idea/
+.obsidian/
+
+# Runtime output: reports, drafts, dependency logs - anything the Bits or the
+# launcher write while working
+Bit Reports/
+*.eml
+bits_install_log.txt
+
+# Settings and state live in the user's home directory, never in the repo:
+#   ~/.busy_business_bits.json   - API key, model, per-Bit webhooks
+#   ~/.busy_business_bits/       - tasks, index, metrics, approvals
+# Listed here as belt and braces in case anyone relocates them.
+.busy_business_bits.json
+.busy_business_bits/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Working notes and superseded drafts kept locally, not published
+_notes/

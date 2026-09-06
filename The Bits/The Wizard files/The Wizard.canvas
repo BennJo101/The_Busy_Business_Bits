@@ -1,0 +1,9 @@
+{
+	"nodes":[
+		{"id":"ff187dea972fa453","x":-304,"y":-40,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Wizard files/GIFs and PNG/Wizard.gif"},
+		{"id":"e4aa81680a7da935","x":141,"y":-40,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Wizard files/GIFs and PNG/Wizard Spell Cast Snap.gif"},
+		{"id":"ad782f1c46a8449f","x":141,"y":-520,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Wizard files/Program Versions.md"},
+		{"id":"03ba5ef7bb139406","x":-304,"y":-520,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Wizard files/The Wizard.md"}
+	],
+	"edges":[]
+}

@@ -1,0 +1,12 @@
+# The Busy Business Bits — runtime dependencies
+#
+# Everything else the app uses (tkinter, urllib, wave, winsound) is stdlib.
+# The Anthropic API is called over plain urllib, so no SDK is needed.
+
+# Sprite loading and GIF animation. Required.
+Pillow>=10.0
+
+# Push-to-talk "mic" button in the console. Optional — without these the
+# button just prints an install hint and the rest of the app works fine.
+SpeechRecognition>=3.10
+PyAudio>=0.2.14

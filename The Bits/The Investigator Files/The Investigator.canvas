@@ -1,0 +1,12 @@
+{
+	"nodes":[
+		{"id":"43a9aa16f38d1797","x":-260,"y":-26,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Investigator Files/GIFs and PNG/Investigator_idle_loop.gif"},
+		{"id":"2b94f2b1b631d75f","x":185,"y":-26,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Investigator Files/GIFs and PNG/Investigator_investigate_loop.gif"},
+		{"id":"9badc5f7ccbaec50","x":630,"y":-26,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Investigator Files/GIFs and PNG/Investigator_snap_loop.gif"},
+		{"id":"6e7e27f82cd8caec","x":1075,"y":-26,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Investigator Files/GIFs and PNG/Investigator_snap_talk_loop.gif"},
+		{"id":"7f109dffbbcdcf14","x":1520,"y":-26,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Investigator Files/GIFs and PNG/Investigator_talk_loop.gif"},
+		{"id":"d8e21d8d47c13002","type":"file","file":"The Busy Business Bits Project/The Bits/The Investigator Files/The Investigator.md","x":-260,"y":-480,"width":400,"height":400},
+		{"id":"c59b9227bd387177","type":"file","file":"The Busy Business Bits Project/The Bits/The Investigator Files/Program Versions.md","x":185,"y":-480,"width":400,"height":400}
+	],
+	"edges":[]
+}

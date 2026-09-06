@@ -1,0 +1,12 @@
+{
+	"nodes":[
+		{"id":"21f40ec510cca89d","x":117,"y":-21,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Courier Files/GIFs and PNG/Courier_deliver_loop.gif"},
+		{"id":"ee972cbfc804ec82","x":562,"y":-21,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Courier Files/GIFs and PNG/Courier_idle_loop.gif"},
+		{"id":"bc26e0c1c52e7e0e","x":1007,"y":-21,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Courier Files/GIFs and PNG/Courier_snap_loop.gif"},
+		{"id":"40620fe457373d59","x":1452,"y":-21,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Courier Files/GIFs and PNG/Courier_talk_loop.gif"},
+		{"id":"d4411e2978957ab5","x":1897,"y":-21,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Courier Files/GIFs and PNG/Courierr_snap_talk_loop.gif"},
+		{"id":"5824b9b688b6b845","type":"file","file":"The Busy Business Bits Project/The Bits/The Courier Files/Program Versions.md","x":562,"y":-480,"width":400,"height":400},
+		{"id":"653ca99fcb56b487","type":"file","file":"The Busy Business Bits Project/The Bits/The Courier Files/The Courier.md","x":117,"y":-480,"width":400,"height":400}
+	],
+	"edges":[]
+}

@@ -1,0 +1,13 @@
+{
+	"nodes":[
+		{"id":"429990048fd5a50c","x":-142,"y":413,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Coder Files/GIFs and PNG/Coder_idle_loop.gif"},
+		{"id":"b48c4e354c977651","x":303,"y":413,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Coder Files/GIFs and PNG/Coder_snap_loop.gif"},
+		{"id":"91b83a63e0c1b996","x":748,"y":413,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Coder Files/GIFs and PNG/Coder_snap_talk_loop.gif"},
+		{"id":"941fa2c32066c53b","x":1193,"y":413,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Coder Files/GIFs and PNG/Coder_talk_loop.gif"},
+		{"id":"94931c933d90a9ac","x":1638,"y":413,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Coder Files/GIFs and PNG/Coder_typing_loop.gif"},
+		{"id":"be4bad6f55ff28ff","x":2083,"y":413,"width":400,"height":400,"type":"file","file":"The Busy Business Bits Project/The Bits/The Coder Files/GIFs and PNG/Coder_typing_normal_loop.gif"},
+		{"id":"efd4320fa4420b43","type":"file","file":"The Busy Business Bits Project/The Bits/The Coder Files/The Coder.md","x":-142,"y":-60,"width":400,"height":400},
+		{"id":"d0538facea87fe6d","type":"file","file":"The Busy Business Bits Project/The Bits/The Coder Files/Program Versions.md","x":303,"y":-60,"width":400,"height":400}
+	],
+	"edges":[]
+}

@@ -1,0 +1,5 @@
+- Hosted on server
+- Hosts the license for the bits
+- Gives data overview of "The Bits"
+- Gives expert data driven business advice.
+- Business overview analytics/KPI
