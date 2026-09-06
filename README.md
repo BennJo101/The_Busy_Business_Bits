@@ -41,6 +41,7 @@ no external assets. Point GitHub Pages at the `/docs` folder to publish it.
 | `Run The Bits.bat` | The real thing. Needs an API key. |
 | `busy_business_bits.py --voices` | Plays every Bit's voice once, for tuning. |
 | `python bits_tools.py` | Prints the tool registry: who owns what, and which tools are gated. |
+| `python selftest.py` | Checks the reply path, the gate and the sprites. No API key needed. |
 
 Needs Python 3.8+ and Pillow.
 

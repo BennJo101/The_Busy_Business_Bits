@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 import wave
 from array import array
+from string import Formatter
 
 # The operational layer. Optional on purpose - without it the Bits still talk,
 # they just can't do anything, so a broken tools module degrades to the old
@@ -523,6 +524,26 @@ Rules of the room:
 - If nobody needs to reply after you, just finish. Silence is fine.
 """.strip()
 
+def room_rules(present):
+    """The shared rules with every placeholder filled.
+
+    In one place on purpose. A template field with no matching argument raises
+    KeyError at reply time, and demo mode replaces ask_bit wholesale, so a miss
+    here never shows up in a demo run - it reaches you as a Bit that answers
+    every line with an error.
+    """
+    fields = {
+        "present": ", ".join(present) if present else "nobody else",
+        "user": user_name(),
+    }
+    missing = [f for _, f, _, _ in Formatter().parse(ROOM_RULES)
+               if f and f not in fields]
+    if missing:                       # never silently ship a half-filled prompt
+        raise ApiError("room rules want %s and nothing supplies it"
+                       % ", ".join(missing))
+    return ROOM_RULES.format(**fields)
+
+
 # Appended only for Bits that actually have tools. The hard part isn't calling
 # them - it's that a tool returns forty lines and the Bit has three sentences to
 # say it in.
@@ -593,9 +614,7 @@ def ask_bit(api_key, model, bit_name, room_log, present, webhook=None, on_tool=N
     if webhook:
         return ask_webhook(webhook, bit_name, room_log, present)
 
-    system = BITS[bit_name]["persona"] + "\n\n" + ROOM_RULES.format(
-        present=", ".join(present) if present else "nobody else"
-    )
+    system = BITS[bit_name]["persona"] + "\n\n" + room_rules(present)
     tools = []
     if tools_available(bit_name):
         system += "\n\n" + TOOL_RULES
