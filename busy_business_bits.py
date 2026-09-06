@@ -172,6 +172,8 @@ class Animator:
         cls._cache[key] = (frames, durations)
         return frames, durations
 
+    _peaks = {}
+
     def total_ms(self, path):
         """How long this state runs end to end. The Wizard's cast is 49 frames;
         anything that wants to wait for it has to ask rather than guess."""
@@ -180,6 +182,46 @@ class Animator:
             return sum(durations)
         except Exception:
             return 0
+
+    @classmethod
+    def peak_ms(cls, path):
+        """When this state's effect is at its brightest, in ms from the start.
+
+        Found by looking for colours the sprite never wears at rest - the
+        Wizard's sparkles are a yellow that appears nowhere in his idle frame -
+        and taking the frame where there is most of it. Measured rather than
+        written down, so redrawing the cast moves the cue with it.
+
+        Returns 0 when a state has no such effect, e.g. a plain idle loop.
+        """
+        if path in cls._peaks:
+            return cls._peaks[path]
+        out = 0
+        try:
+            frames = []
+            with Image.open(path) as im:
+                for fr in ImageSequence.Iterator(im):
+                    ms = max(40, int(fr.info.get("duration", 100) or 100))
+                    frames.append((ms, fr.convert("RGB").getcolors(1 << 20) or []))
+            if frames:
+                at_rest = {c for _, c in frames[0][1]}
+                tally = {}
+                for i, (_, cols) in enumerate(frames):
+                    for n, c in cols:
+                        if c not in at_rest:
+                            tally.setdefault(c, {})[i] = n
+                if tally:
+                    # the colour with the most pixels across the run is the
+                    # effect itself, not a stray dither pixel
+                    col = max(tally, key=lambda c: sum(tally[c].values()))
+                    hit = max(tally[col], key=lambda i: tally[col][i])
+                    # up to, not through - the cue wants to land as the
+                    # brightest frame is drawn, not as it leaves
+                    out = sum(ms for ms, _ in frames[:hit])
+        except Exception:
+            out = 0
+        cls._peaks[path] = out
+        return out
 
     def play(self, path, restart=False):
         # restart=True replays a state that's already on screen - the Wizard's
@@ -530,9 +572,11 @@ class Console(tk.Frame):
             except Exception:
                 pass
         self.wiz_anim.play(snap, restart=True)
-        ms = self.wiz_anim.total_ms(snap) or 1100
-        self._flourish_job = self.after(ms, lambda: self._end_flourish(idle))
-        return ms
+        full = self.wiz_anim.total_ms(snap) or 1100
+        self._flourish_job = self.after(full, lambda: self._end_flourish(idle))
+        # the cast plays out in full, but the cue a caller waits on is the
+        # sparkle peak - the moment the spell actually lands
+        return self.wiz_anim.peak_ms(snap) or full
 
     def _end_flourish(self, idle):
         self._flourish_job = None
@@ -581,6 +625,7 @@ class App:
 
         self._pump()
         self._ambient_tick()
+        self._warm_peaks()
         root.protocol("WM_DELETE_WINDOW", self.quit)
 
     # -- summoning ----------------------------------------------------------
@@ -621,11 +666,11 @@ class App:
         self._pending[name] = (x, y)
         self.console.set_active(name, True)
         self.console.room_sys("The Wizard begins the summoning of %s..." % SHORT[name])
-        ms = self.console.wizard_flourish(self.sprites.get("The Wizard", {}))
-        self.root.after(max(0, ms), lambda: self._land(name))
+        cue = self.console.wizard_flourish(self.sprites.get("The Wizard", {}))
+        self.root.after(max(0, cue), lambda: self._land(name))
 
     def _land(self, name):
-        """The BAM. Called once the Wizard's cast has finished."""
+        """The BAM. Fires on the sparkle peak, with the cast still playing."""
         xy = self._pending.pop(name, None)
         if xy is None or name in self.windows:
             return                  # dismissed or cancelled mid-cast
@@ -684,6 +729,17 @@ class App:
         for t in targets:
             self.turn_q.put((t, 0))
         self._drain()
+
+    def _warm_peaks(self):
+        """Scan the Wizard's cast for its sparkle peak up front.
+
+        It costs about 400ms, and doing it lazily would spend that on the main
+        thread at the exact moment the first cast is meant to start playing.
+        """
+        snap = (self.sprites.get("The Wizard") or {}).get("snap")
+        if not snap:
+            return
+        threading.Thread(target=Animator.peak_ms, args=(snap,), daemon=True).start()
 
     # -- ambient ------------------------------------------------------------
     def _ambient_tick(self):
