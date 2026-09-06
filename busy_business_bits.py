@@ -22,6 +22,11 @@ from tkinter import ttk
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+try:                    # needs HERE on the path first
+    import bits_ambient  # noqa: E402
+except Exception:        # noqa: BLE001
+    bits_ambient = None
+
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 LOG = os.path.join(HERE, "bits_install_log.txt")
 
@@ -531,6 +536,10 @@ class App:
         self.busy = False
         self._slot = 0
         self.results = queue.Queue()
+        try:
+            self.ambient = bits_ambient.Ambient() if bits_ambient else None
+        except Exception:                                         # noqa: BLE001
+            self.ambient = None      # watchers are a luxury; never fatal
 
         root.title("The Busy Business Bits")
         root.configure(bg=FRAME_DARK)
@@ -553,6 +562,7 @@ class App:
             threading.Thread(target=self._refresh_models, daemon=True).start()
 
         self._pump()
+        self._ambient_tick()
         root.protocol("WM_DELETE_WINDOW", self.quit)
 
     # -- summoning ----------------------------------------------------------
@@ -638,6 +648,28 @@ class App:
         for t in targets:
             self.turn_q.put((t, 0))
         self._drain()
+
+    # -- ambient ------------------------------------------------------------
+    def _ambient_tick(self):
+        """Give the watchers a look at the world every few seconds.
+
+        A nudge is delivered exactly like a spoken line, so everything
+        downstream - the chain limit, the voice, the transcript - works on it
+        unchanged. The Bit sees a stage direction rather than a line from you.
+        """
+        try:
+            if (self.ambient and not self.busy
+                    and self.settings.get("ambient", True)
+                    and self.turn_q.empty()):
+                n = self.ambient.poll(self.present())
+                if n:
+                    self.room_log.append(("(noticed)", n.text))
+                    self.console.room_sys("%s %s" % (SHORT.get(n.bit, n.bit), n.tag))
+                    self.turn_q.put((n.bit, 0))
+                    self._drain()
+        except Exception:                                         # noqa: BLE001
+            pass
+        self.root.after(4000, self._ambient_tick)
 
     def webhook_for(self, name):
         """A Bit's own n8n webhook, or "" if it goes through the shared key."""
@@ -896,9 +928,11 @@ class SettingsDialog(tk.Toplevel):
 
         self.voices = tk.BooleanVar(value=app.settings.get("voices", True))
         self.chatter = tk.BooleanVar(value=app.settings.get("chatter", True))
+        self.ambient = tk.BooleanVar(value=app.settings.get("ambient", True))
         for i, (var, label) in enumerate([
             (self.voices, "garbled voices"),
             (self.chatter, "let Bits answer each other"),
+            (self.ambient, "let Bits speak up on their own"),
         ]):
             tk.Checkbutton(self, text=label, variable=var, bg=FRAME_DARK, fg=PAPER,
                            selectcolor=INK, activebackground=FRAME_DARK,
@@ -908,14 +942,14 @@ class SettingsDialog(tk.Toplevel):
 
         # --- per-Bit n8n webhooks -------------------------------------------
         tk.Label(self, text="Per-Bit n8n webhooks", bg=FRAME_DARK, fg="#e8d9b8",
-                 font=("Consolas", 9, "bold")).grid(row=8, column=0, sticky="w",
+                 font=("Consolas", 9, "bold")).grid(row=9, column=0, sticky="w",
                                                     padx=14, pady=(12, 0))
-        tk.Label(self, text="blank = use the shared Anthropic key above",
+        tk.Label(self, text="blank = use the shared API key above",
                  bg=FRAME_DARK, fg="#8a7d70", font=("Consolas", 7, "italic")
-                 ).grid(row=9, column=0, columnspan=2, sticky="w", padx=14)
+                 ).grid(row=10, column=0, columnspan=2, sticky="w", padx=14)
 
         hooks = tk.Frame(self, bg=FRAME_DARK)
-        hooks.grid(row=10, column=0, columnspan=2, sticky="we", padx=14, pady=(4, 0))
+        hooks.grid(row=11, column=0, columnspan=2, sticky="we", padx=14, pady=(4, 0))
         saved = app.settings.get("webhooks") or {}
         self.hooks = {}
         for i, name in enumerate(available_bits(app.sprites)):
@@ -931,7 +965,7 @@ class SettingsDialog(tk.Toplevel):
             self.hooks[name] = e
 
         bar = tk.Frame(self, bg=FRAME_DARK)
-        bar.grid(row=11, column=0, columnspan=2, sticky="e", padx=14, pady=12)
+        bar.grid(row=12, column=0, columnspan=2, sticky="e", padx=14, pady=12)
         tk.Button(bar, text="cancel", bg="#3d2f34", fg=PAPER, bd=0, cursor="hand2",
                   font=("Consolas", 9), command=self.destroy).pack(side="left", padx=4, ipadx=8)
         tk.Button(bar, text="save", bg=FRAME_GOLD, fg=INK, bd=0, cursor="hand2",
@@ -939,7 +973,7 @@ class SettingsDialog(tk.Toplevel):
 
         self.status = tk.Label(self, text="", bg=FRAME_DARK, fg="#8a7d70",
                                font=("Consolas", 8))
-        self.status.grid(row=12, column=0, columnspan=2, sticky="w", padx=14, pady=(0, 8))
+        self.status.grid(row=13, column=0, columnspan=2, sticky="w", padx=14, pady=(0, 8))
 
     def _fetch(self):
         k = self.key.get().strip()
@@ -981,6 +1015,7 @@ class SettingsDialog(tk.Toplevel):
         s["model"] = self.model.get().strip()
         s["voices"] = bool(self.voices.get())
         s["chatter"] = bool(self.chatter.get())
+        s["ambient"] = bool(self.ambient.get())
         s["webhooks"] = hooks
         save_settings(s)
         if hooks:

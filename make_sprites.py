@@ -252,14 +252,17 @@ LIB_INK = (200, 162, 74)    # the roster gold, which reads fine on sky
 
 # The desk, traced cell-for-cell off the Secretary's so they match: 34 wide,
 # top edge on row 44, legs down to the grass.
+# Same footprint and height as the Secretary's so the roster still lines up,
+# but paneled into three bays with a return slot in the middle one - a lending
+# counter rather than an office desk.
 DESK = [
     "OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
     "OEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEO",
     ".OOdddDDDDDDDDDDDDDDDDDDDDdddOO...",
-    "..OddDDDDDDDDDDDDDDDDDDDDDDDDddO..",
-    "..OddDDDDDDDDDDDDDDDDDDDDDDDDddO..",
-    "..OddDDDDDDDDDDDDDDDDDDDDDDDDddO..",
-    "..OdddDDDDDDDDDDDDDDDDDDDDDDdddO..",
+    "..OddDDDDDDDddDDDDDDddDDDDDDDddO..",
+    "..OddDDDDDDDddOOOOOOddDDDDDDDddO..",
+    "..OddDDDDDDDddDDDDDDddDDDDDDDddO..",
+    "..OdddDDDDDDddDDDDDDddDDDDDDdddO..",
     ".OOddddddddddddddddddddddddddddOO.",
     ".OEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEO.",
     "..OLOOOOOOOOOOOOOOOOOOOOOOOOOOLO..",
@@ -285,16 +288,37 @@ OPEN_BOOK = [                   # what she is reading, lying on the desk
 ]
 OPEN_BOOK_X, OPEN_BOOK_Y = 27, 41
 
-# a raised hand, angling down to meet the shoulder so it reads as attached
-ARM = [
-    "OFFO..",
-    "OFFO..",
-    ".OFFO.",
-    ".OFFO.",
-    "..OFFO",
-    "..OFFO",
+# The raised arm, built the way the hand-drawn Bits do it: cardigan sleeve out
+# of the shoulder, ribbed cuff, then skin. The old version was skin all the way
+# down and only touched the body on its last row, so it read as a floating hand.
+# The bottom two rows deliberately overwrite the torso outline - that overlap is
+# what makes it look attached rather than adjacent.
+ARM_UP = [
+    ".OO.OO...",     # two fingertips, parted - the slit runs off the top edge
+    ".OFOFFO..",     # so it reads as fingers, not a hole punched in the hand
+    "OFFFFFO..",
+    "OFFFFFO..",
+    ".OFFFFO..",
+    ".OccccO..",     # cuff
+    ".OCCCCO..",
+    "..OCCCCO.",
+    "..OCCCCO.",
+    "...OCCCC.",     # merges into the shoulder
 ]
-ARM_X, ARM_Y = 21, 35
+# the follow-through: hand drops a row and the fingers close
+ARM_SNAP = [
+    ".........",
+    "..OOOO...",
+    ".OFFFFO..",
+    "OFFFFFO..",
+    ".OFFFFO..",
+    ".OccccO..",
+    ".OCCCCO..",
+    "..OCCCCO.",
+    "..OCCCCO.",
+    "...OCCCC.",
+]
+ARM_X, ARM_Y = 20, 33
 
 
 def librarian_art(mouth=0, blink=0):
@@ -336,6 +360,7 @@ LIB_X, LIB_Y = 25, 28
 
 
 def librarian_card(mouth=0, arms=0, book=0, blink=0, breath=0):
+    """arms: 0 down, 1 raised, 2 the snap follow-through."""
     g = blank_card()
     draw_text(g, SMALL, "The", THE_X, THE_ROW + 7, BLACK)
     w = text_width(LARGE, "Librarian")
@@ -343,7 +368,7 @@ def librarian_card(mouth=0, arms=0, book=0, blink=0, breath=0):
     # she settles a row as she breathes; the desk swallows the extra row
     stamp(g, librarian_art(mouth, blink), LIB_X, LIB_Y + breath)
     if arms:
-        stamp(g, ARM, ARM_X, ARM_Y + breath)
+        stamp(g, ARM_SNAP if arms == 2 else ARM_UP, ARM_X, ARM_Y + breath)
     stamp(g, BOOKS, BOOKS_X, BOOKS_Y)
     if book:
         stamp(g, OPEN_BOOK, OPEN_BOOK_X, OPEN_BOOK_Y - (book - 1))
@@ -377,14 +402,16 @@ def states_for(which):
     blink = [0, 0, 0, 0, 0, 1, 0, 0]
     br = [0, 0, 1, 1, 1, 1, 0, 0]       # every frame must differ from the last,
     br2 = [0, 1] * 6                    # or Pillow folds them into one long one
+    snap = [1, 1, 2, 2]                 # raise, hold, snap, follow through
     return [
         ("idle_loop", [librarian_card(0, 0, 0, blink[i], br[i])
                        for i in range(8)], 330),
         ("talk_loop", [librarian_card(1 + i % 2, 0, 0, 0, br[i])
                        for i in range(6)], 330),
-        ("snap_loop", [librarian_card(0, 1, 0, blink[i % 8], br2[i])
+        # the arm carries the motion now, so the body can breathe calmly under it
+        ("snap_loop", [librarian_card(0, snap[i % 4], 0, blink[i % 8], br[i % 8])
                        for i in range(12)], 160),
-        ("snap_talk_loop", [librarian_card(1 + i % 2, 1, 0, 0, br2[i])
+        ("snap_talk_loop", [librarian_card(1 + i % 2, snap[i % 4], 0, 0, br[i % 8])
                             for i in range(12)], 160),
         ("shelve_loop", [librarian_card(0, i % 2, 1, blink[i], br[i])
                          for i in range(8)], 330),

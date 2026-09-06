@@ -66,6 +66,29 @@ sits, so the same character behaves differently on each screen with no configura
 the Coder on your code monitor watches that repo, and dragging a Bit onto an open
 folder window makes it adopt that folder until dismissed.
 
+## Speaking first
+
+Tools let a Bit answer when spoken to; the watchers in `bits_ambient.py` let one
+speak without being asked. Each watcher belongs to a single Bit and returns
+something only when the world has actually changed — which is almost never, and
+that's the point. A character who comments on everything gets muted within a day.
+
+| Watcher | Bit | Fires when |
+|---|---|---|
+| clipboard | Coder | You copy something that looks like an error — a traceback, a stack frame, a compiler code. Ordinary copies are ignored. |
+| downloads | Courier | New files land in Downloads |
+| brief | Secretary | First time you're at the desk each day, and only if something is actually due |
+| due | Secretary | A task falls due or goes past due |
+| approvals | Boss | A Bit queues something needing his nod |
+| repo | Coder | The build breaks, or work sits uncommitted for days |
+| haunt | Ghost | Occasionally, one abandoned thing — never the same one twice |
+
+Four rules keep it bearable: only summoned Bits speak, nothing fires twice (keys
+are persisted, so it survives a restart), a global cooldown means two watchers
+going off together still produce one line, and a watcher's first poll records the
+world rather than announcing all of it. Turn the lot off with *let Bits speak up
+on their own* in settings.
+
 ## Permissions and the gate
 
 The Boss holds the license in the fiction, so he holds the permission gate in the
@@ -162,6 +185,7 @@ Since personality lives in your workflow, the built-in persona and room rules ar
 | `busy_business_bits.py` | Windows, animation, routing, UI |
 | `bits_core.py` | Roster and personalities, sprite discovery, voice synthesis, API client |
 | `bits_tools.py` | The operational layer: every tool, the ownership map, the gate |
+| `bits_ambient.py` | The watchers that let a Bit speak first |
 | `make_sprites.py` | Builds the Ghost and Librarian art |
 
 ## Generated sprites
