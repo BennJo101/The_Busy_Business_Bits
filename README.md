@@ -29,6 +29,10 @@ Bits could plausibly own a job, the job is split wrong.
 A fuller breakdown of what each character owns and why — the four surfaces, the
 routines, the build order — is in [docs/bit-duties.md](docs/bit-duties.md).
 
+There's also a landing page at [docs/index.html](docs/index.html): one
+self-contained file with all nine characters animating in it, no build step and
+no external assets. Point GitHub Pages at the `/docs` folder to publish it.
+
 ## Running it
 
 | File | What it does |
