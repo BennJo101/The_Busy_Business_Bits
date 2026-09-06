@@ -248,7 +248,7 @@ def ghost_card(bob=0, mouth=0, arms=0, tail=0):
 
 
 # ===========================================================================
-# THE LIBRARIAN - stands on the ground, book in hand
+# THE LIBRARIAN - at her counter, head and shoulders above it
 # ===========================================================================
 LIB_INK = (200, 162, 74)    # the roster gold, which reads fine on sky
 
@@ -282,13 +282,6 @@ BOOKS = [                       # a stack where the Secretary keeps her mug
     ".OqqqqO.",
 ]
 BOOKS_X, BOOKS_Y = 40, 38
-
-OPEN_BOOK = [                   # what she is reading, lying on the desk
-    "..OOOOOO..",
-    ".OPPPOPPPO",
-    ".OOOOOOOOO",
-]
-OPEN_BOOK_X, OPEN_BOOK_Y = 27, 41
 
 # Measured off the Secretary's snap frame by frame, not eyeballed. Tracking her
 # hand through the loop gives this, where the numbers are cells:
@@ -418,7 +411,7 @@ def librarian_art(mouth=0, blink=0):
 LIB_X, LIB_Y = 25, 28
 
 
-def librarian_card(mouth=0, arm=None, book=0, blink=0, breath=0):
+def librarian_card(mouth=0, arm=None, blink=0, breath=0):
     """arm: None, or (pose, lift, sparks) - see arm_art."""
     g = blank_card()
     draw_text(g, SMALL, "The", THE_X, THE_ROW + 7, BLACK)
@@ -429,8 +422,6 @@ def librarian_card(mouth=0, arm=None, book=0, blink=0, breath=0):
     if arm:
         stamp(g, arm_art(arm[0], arm[1], arm[2]), ARM_X, ARM_Y + breath)
     stamp(g, BOOKS, BOOKS_X, BOOKS_Y)
-    if book:
-        stamp(g, OPEN_BOOK, OPEN_BOOK_X, OPEN_BOOK_Y - (book - 1))
     stamp(g, DESK, DESK_X, DESK_Y)
     ellipse_shadow(g, 32, 56, 16)
     return g
@@ -462,21 +453,18 @@ def states_for(which):
     br = [0, 0, 1, 1, 1, 1, 0, 0]       # every frame must differ from the last,
     br2 = [0, 1] * 6                    # or Pillow folds them into one long one
     return [
-        ("idle_loop", [librarian_card(0, 0, 0, blink[i], br[i])
+        ("idle_loop", [librarian_card(0, 0, blink[i], br[i])
                        for i in range(8)], 330),
-        ("talk_loop", [librarian_card(1 + i % 2, 0, 0, 0, br[i])
+        ("talk_loop", [librarian_card(1 + i % 2, 0, 0, br[i])
                        for i in range(6)], 330),
         # the arm carries the motion now, so the body can breathe calmly under it
         # each pose carries its own length - a held wind-up is one long frame
         # rather than the same frame twice
-        ("snap_loop", [librarian_card(0, a, 0, 0, 0) for a in SNAP_SCRIPT],
+        ("snap_loop", [librarian_card(0, a, 0, 0) for a in SNAP_SCRIPT],
          [a[3] for a in SNAP_SCRIPT]),
-        ("snap_talk_loop", [librarian_card(1 + i % 2, a, 0, 0, 0)
+        ("snap_talk_loop", [librarian_card(1 + i % 2, a, 0, 0)
                             for i, a in enumerate(SNAP_SCRIPT)],
          [a[3] for a in SNAP_SCRIPT]),
-        # shelving: she reaches for the book rather than snapping
-        ("shelve_loop", [librarian_card(0, ("curl", 7 + i % 2, False), 1, blink[i], br[i])
-                         for i in range(8)], 330),
     ]
 
 
