@@ -105,6 +105,24 @@ def test_gate():
           "tools" in tools.run_tool("The Wizard", "bit_status", {}).lower()
           or "scope" in tools.run_tool("The Wizard", "bit_status", {}).lower())
 
+    # the gate has to reach the screen: a ruling can't happen off screen, so
+    # hitting it fetches the Boss and tells the queuing Bit he is coming
+    raised = []
+    tools.ON_APPROVAL_NEEDED = lambda it: (raised.append(it)
+                                           or "The Boss is on his way.")
+    try:
+        out = tools.run_tool("The Reaper", "delete_paths", {"paths": ["x"]})
+    finally:
+        tools.ON_APPROVAL_NEEDED = None
+    check("hitting the gate raises the Boss", len(raised) == 1, raised)
+    check("the approval says who wanted what",
+          raised and raised[0]["bit"] == "The Reaper"
+          and "delete_paths" in raised[0]["summary"], raised)
+    check("and the Bit is told he is coming", "on his way" in out, out[:90])
+    if raised:
+        tools.run_tool("The Boss", "refuse",
+                       {"id": raised[0]["id"], "reason": "selftest"})
+
 
 def test_summoning():
     """The Wizard summoning by voice - the part the roster buttons never touch."""

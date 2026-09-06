@@ -47,7 +47,10 @@ the numbers.
 - **Ask** — "what did I bill in August", "what's my hourly on this client", "is this
   worth doing at £X". Runway, margin, unit economics against real files.
 - **Gate** — Reaper's deletions, Courier's outbound sends, Wizard's installs. He shows
-  the diff and asks once.
+  the diff and asks once. He doesn't have to be on screen for it: anything hitting the
+  gate has the Wizard fetch him, and the queuing Bit is told he's coming, so it puts the
+  case to him rather than filing it and hoping. Every other Bit is fetched by being
+  named — the Boss is the one fetched by the gate itself.
 
 ## The Coder — *build*
 
@@ -125,9 +128,13 @@ Not a worker. The control surface — he lives in the console and runs the machi
 runs the Bits.
 
 - **Summoning** — the roster buttons are one way in; asking him is the other. "Wizard,
-  get me the Coder", or just "Coder, look at this" into an empty room, and he casts for
-  real, then hands the job over by name so the Bit lands already holding it. "Send the
-  Reaper away" puts one back.
+  get me the Coder", or just "Coder, look at this", and he casts for real, then hands the
+  job over by name so the Bit lands already holding it. "Send the Reaper away" puts one
+  back.
+- **Fetching** — he also casts unasked, whenever a name would otherwise reach nobody: you
+  or another Bit calls on someone who isn't on screen and he goes and gets them. Off screen
+  is not unavailable, and that difference is the whole reason he exists. It's what lets a
+  routine start from an empty desk.
 - **Routines** — named multi-Bit macros on one word. "Okay… BAM!" and a whole sequence
   fires. See *Routines* below.
 - **Profiles** — desktop states. *Work* summons Boss, Coder, Secretary and opens the

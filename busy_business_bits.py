@@ -133,6 +133,7 @@ CARD = 260          # rendered sprite size, px
 CHAT_H = 7          # transcript rows
 MAX_CHAIN = 3       # how far a Bit-to-Bit conversation may cascade
 HOST = "The Wizard"  # runs the console; never gets a window of his own
+BOSS = "The Boss"    # holds the gate, so he gets fetched when one is hit
 
 
 # ---------------------------------------------------------------------------
@@ -603,10 +604,15 @@ class App:
         self.results = queue.Queue()
         self._pending = {}          # summoned, mid-cast, not yet on screen
         self._quiet_cast = set()    # cast by the Wizard mid-line; he'll say it himself
+        self._on_arrival = {}       # lines to put up on a card that doesn't exist yet
+        self._just_dismissed = set()   # don't fetch back what this exchange sent away
+        self._queued = set()        # who already has a turn waiting, so nobody
+                                    # is asked the same thing twice in one breath
         if bits_tools:
             # the Wizard's summon_bit / dismiss_bit reach the screen through here
             bits_tools.ON_STAGE = self._stage_request
             bits_tools.STAGE_PRESENT = self.present
+            bits_tools.ON_APPROVAL_NEEDED = self._approval_raised
         try:
             self.ambient = bits_ambient.Ambient() if bits_ambient else None
         except Exception:                                         # noqa: BLE001
@@ -647,6 +653,7 @@ class App:
     def summon(self, name, quiet=False):
         """`quiet` means the Wizard cast this one mid-sentence, so his own reply
         carries the BAM and _land shouldn't say it a second time."""
+        self._just_dismissed.discard(name)      # asked for outright; that wins
         if (name == HOST or name in self.windows or name in self._pending
                 or not self.sprites.get(name, {}).get("idle")):
             return
@@ -682,6 +689,19 @@ class App:
         cue = self.console.wizard_flourish(self.sprites.get("The Wizard", {}))
         self.root.after(max(0, cue), lambda: self._land(name))
 
+    def _why_not_summon(self, name):
+        """Why `name` can't be cast right now, or "" if it can."""
+        if name == HOST or name not in BITS:
+            return "%s isn't one of the Bits." % name
+        if not self.sprites.get(name, {}).get("idle"):
+            return ("%s has no sprites on disk yet - there's nothing to summon."
+                    % SHORT[name])
+        if name in self.windows:
+            return "%s is already in the room." % name
+        if name in self._pending:
+            return "%s is already mid-cast and about to land." % name
+        return ""
+
     def _stage_request(self, action, name):
         """The Wizard casting from inside a reply, rather than from the roster.
 
@@ -696,17 +716,32 @@ class App:
                 return "%s isn't here." % name
             self.root.after(0, lambda: self.dismiss(name))
             return "%s is on the way out." % name
-        if not self.sprites.get(name, {}).get("idle"):
-            return ("%s has no sprites on disk yet - there's nothing to summon."
-                    % SHORT[name])
-        if name in self.windows:
-            return "%s is already in the room." % name
-        if name in self._pending:
-            return "%s is already mid-cast and about to land." % name
+        why = self._why_not_summon(name)
+        if why:
+            return why
         # he is mid-line, so let his own reply be the BAM rather than doubling it
         self.root.after(0, lambda: self.summon(name, quiet=True))
         return ("%s is arriving on the sparkle. Address them by name in this very "
                 "reply and they'll pick it up as they land." % name)
+
+    def _approval_raised(self, item):
+        """A Bit has hit the gate. Fetch the Boss - a ruling can't happen off
+        screen, and the Bit shouldn't have to say "ask him when you next see him".
+
+        Called from the queuing Bit's worker thread, inside the gate itself, and
+        what it returns lands in that Bit's tool result.
+        """
+        who = SHORT.get(item.get("bit", ""), item.get("bit", ""))
+        line = "%s needs the Boss - %s" % (who, item.get("summary", ""))
+        self.root.after(0, lambda: self.console.room_sys(line))
+        if BOSS in self.windows or BOSS in self._pending:
+            return "The Boss is here - put it to him by name and he can rule on it."
+        why = self._why_not_summon(BOSS)
+        if why:
+            return why
+        self.root.after(0, lambda: self.summon(BOSS, quiet=True))
+        return ("The Wizard is fetching the Boss for this one - put the case to "
+                "him by name in this very reply, so he has it as he lands.")
 
     def _land(self, name):
         """The BAM. Fires on the sparkle peak, with the cast still playing."""
@@ -714,6 +749,8 @@ class App:
         if xy is None or name in self.windows:
             return                  # dismissed or cancelled mid-cast
         self.windows[name] = BitWindow(self, name, xy[0], xy[1])
+        for speaker, line in self._on_arrival.pop(name, []):
+            self.windows[name].heard(speaker, line)
         self.console.room_sys("Okay... BAM! %s is in." % SHORT[name])
         quiet = name in self._quiet_cast     # he cast this one mid-sentence
         self._quiet_cast.discard(name)
@@ -722,6 +759,8 @@ class App:
 
     def dismiss(self, name):
         self._quiet_cast.discard(name)
+        self._on_arrival.pop(name, None)
+        self._just_dismissed.add(name)
         if name in self._pending:                 # still mid-cast; call it off
             self._pending.pop(name, None)
             self.console.set_active(name, False)
@@ -749,6 +788,34 @@ class App:
         though he has no window."""
         return self.present() + list(self._pending) + [HOST]
 
+    def reachable(self):
+        """Everyone a request can land on, which is everyone the Wizard could
+        fetch: the room, plus any Bit still in the roster with art on disk.
+
+        Being off screen isn't the same as being unavailable - that's what the
+        Wizard is for. A name that reaches nobody is a dropped request, and the
+        chains the whole app is built on are nothing but names.
+        """
+        return [n for n in BITS
+                if n in self.windows or n in self._pending or n == HOST
+                or self.sprites.get(n, {}).get("idle")]
+
+    def fetch(self, name):
+        """Have the Wizard cast for `name` if that's what it takes to reach them.
+
+        Quiet, because whoever asked for them is mid-sentence: the console still
+        prints the BAM, but he doesn't say it over the top of them.
+
+        Not for anyone this exchange just sent away. "Begone, Reaper" names the
+        Reaper, and a rule that fetches whoever is named would have the Wizard
+        undo his own dismissal in the sentence that announced it. Asking for
+        them outright still works - that clears the block on the way through.
+        """
+        if name in self._just_dismissed:
+            return
+        if not self._why_not_summon(name):
+            self.summon(name, quiet=True)
+
     # -- conversation -------------------------------------------------------
     def user_says(self, text, to=None):
         self.room_log.append(("You", text))
@@ -759,7 +826,7 @@ class App:
         else:
             # the Wizard answers when you name him. He is the fall-through
             # only for an empty room, where he's the one who can fetch someone
-            named = find_addressees(text, self.addressable())
+            named = find_addressees(text, self.reachable())
             if named:
                 targets = named[:2]
             elif present:
@@ -772,12 +839,21 @@ class App:
         # the API - but a Bit's window only shows its own thread with you, so
         # only the Bits expected to answer echo your line
         for t in targets:
+            self.fetch(t)
             w = self.windows.get(t)
             if w:
                 w.heard("You", text)
+            elif t != HOST:
+                # summoned by this very line, so there's no card to write on yet
+                # - the question goes up as they land, and they answer it
+                self._on_arrival.setdefault(t, []).append(("You", text))
         for t in targets:
-            self.turn_q.put((t, 0))
+            self._enqueue(t)
         self._drain()
+
+    def _enqueue(self, name, depth=0):
+        self.turn_q.put((name, depth))
+        self._queued.add(name)
 
     def _warm_peaks(self):
         """Scan the Wizard's cast for its sparkle peak up front.
@@ -806,7 +882,7 @@ class App:
                 if n:
                     self.room_log.append(("(noticed)", n.text))
                     self.console.room_sys("%s %s" % (SHORT.get(n.bit, n.bit), n.tag))
-                    self.turn_q.put((n.bit, 0))
+                    self._enqueue(n.bit)
                     self._drain()
         except Exception:                                         # noqa: BLE001
             pass
@@ -820,13 +896,14 @@ class App:
         if self.busy or self.turn_q.empty():
             return
         name, depth = self.turn_q.get()
+        self._queued.discard(name)
         w = self.windows.get(name)
         if w is None and name != HOST:
             if name in self._pending:
                 # summoned a moment ago and still inside the Wizard's cast. Hold
                 # the turn rather than dropping it - the handoff that comes with
                 # a summoning is the whole point of him being able to summon.
-                self.turn_q.put((name, depth))
+                self._enqueue(name, depth)
                 self.root.after(200, self._drain)
                 return
             self._drain()
@@ -888,7 +965,10 @@ class App:
                     continue
                 self._deliver(name, payload, depth)
         except queue.Empty:
-            pass
+            if not self.busy and self.turn_q.empty():
+                # the room has settled, so the goodbye that named someone is
+                # over and done with - they can be called for again
+                self._just_dismissed.clear()
         self.root.after(60, self._pump)
 
     def _deliver(self, name, text, depth):
@@ -902,9 +982,18 @@ class App:
         # stays a clean one-to-one transcript, written by _speak_line below
         self._speak_line(name, text)
 
-        nxt = find_addressees(text, self.addressable(), exclude=(name,))
-        if nxt and depth < MAX_CHAIN and self.settings.get("chatter", True):
-            self.turn_q.put((nxt[0], depth + 1))
+        # a handoff is only a handoff if it reaches someone, so a Bit naming
+        # another has that one fetched. Only the first name in the line, and
+        # only as deep as MAX_CHAIN, so a Bit reeling off the roster doesn't
+        # fill the desktop with it
+        # ...but not to someone already holding a turn. "Wizard, get me the
+        # Coder" names them both, so the Coder is answering the request already
+        # when the Wizard hands it to him - and would otherwise answer twice.
+        nxt = find_addressees(text, self.reachable(), exclude=(name,))
+        if (nxt and depth < MAX_CHAIN and self.settings.get("chatter", True)
+                and nxt[0] not in self._queued):
+            self.fetch(nxt[0])
+            self._enqueue(nxt[0], depth + 1)
 
     def _speak_line(self, name, text, to_window=True):
         w = self.windows.get(name) if to_window else None

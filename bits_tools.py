@@ -266,8 +266,10 @@ def _walk(root, max_files=20000, skip_hidden=True):
 READ, WRITE, EXECUTE, SEND, DESTROY = "read", "write", "execute", "send", "destroy"
 GATED = {EXECUTE, SEND, DESTROY}
 
-# The app sets this so an approval can raise the Boss on screen instead of
-# waiting to be noticed. Signature: fn(approval_dict) -> None
+# The app sets this so an approval fetches the Boss onto the screen instead of
+# sitting in a file waiting to be noticed - a ruling can't happen off screen.
+# Signature: fn(approval_dict) -> str, and what it returns is handed back to the
+# Bit that queued it, so it knows he's coming and can put the case to him.
 ON_APPROVAL_NEEDED = None
 
 
@@ -286,12 +288,13 @@ def request_approval(bit, tool_name, args, summary):
             "summary": summary, "asked": _now(), "state": "pending"}
     a["items"].append(item)
     _put_approvals(a)
+    note = ""
     if ON_APPROVAL_NEEDED:
         try:
-            ON_APPROVAL_NEEDED(item)
-        except Exception:
-            pass
-    return item
+            note = ON_APPROVAL_NEEDED(item) or ""
+        except Exception:                                         # noqa: BLE001
+            note = ""
+    return item, note
 
 
 def _find_approval(aid):
@@ -359,9 +362,10 @@ def run_tool(bit, name, args):
         return "that isn't your job - %s belongs to %s." % (name, t.owner)
     if t.tier in GATED and not args.get("_approved"):
         summary = _summarise_call(name, args)
-        item = request_approval(bit, name, args, summary)
+        item, note = request_approval(bit, name, args, summary)
         return ("QUEUED FOR APPROVAL as %s: %s. Say it needs the Boss's nod "
-                "before you can do it." % (item["id"], summary))
+                "before you can do it.%s"
+                % (item["id"], summary, (" " + note) if note else ""))
     args = {k: v for k, v in args.items() if k != "_approved"}
     try:
         out = t.fn(bit, **args)

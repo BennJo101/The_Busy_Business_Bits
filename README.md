@@ -74,11 +74,21 @@ arriving Bit picks the job up rather than the request falling on an empty desk.
 He can send one back the same way (*"Wizard, the Reaper's done"*), and he'll tell
 you plainly when he can't: no such Bit, already in the room, no sprites on disk.
 
-You don't have to name him. With nobody on screen, an unaddressed line goes to
-the Wizard rather than bouncing off a *summon a Bit first* message — so *"Coder,
-why is this failing?"* into an empty room fetches the Coder and hands him the
-question. Once Bits are on screen the routing is unchanged: they answer, and the
-Wizard only speaks when you call for him.
+You don't have to name him. Naming *anyone* is enough — a Bit who isn't on
+screen is off screen, not unavailable, and that distinction is what the Wizard
+is for. Ask for the Coder and the Coder is fetched, whether the desk is empty or
+crowded. The question waits for the cast and goes up on the new card as it
+lands, so what arrives is a Bit already holding the thing it was called for
+rather than one blinking at an empty room.
+
+The Bits do it to each other too, which is what makes the chains work. The
+Courier saying *"Librarian, this one's yours"* fetches the Librarian; she reads
+the request off the room and files it. Before this, a handoff to anyone not
+already on screen simply fell on the floor — which quietly broke every routine
+started from an empty desk. Only the first name in a line summons, and only as
+deep as `MAX_CHAIN`, so a Bit reeling off the roster doesn't fill the desktop
+with it. Turn the whole thing off with *let Bits answer each other* in
+settings.
 
 This works in `Demo The Bits.bat` too, with no API key — it's the one thing in
 demo mode that actually happens rather than being canned.
@@ -125,6 +135,12 @@ on their own* in settings.
 The Boss holds the license in the fiction, so he holds the permission gate in the
 architecture. Tools are tiered, and the gated tiers **do not run when called** —
 they queue an approval that has to be cleared before anything happens.
+
+Hitting the gate fetches him, and that one doesn't need anybody to say his
+name. A ruling can't be given from off screen, so the Wizard casts for the Boss
+the moment a Bit queues something, and the queuing Bit is told he's on his way —
+it puts the case to him and he lands already holding it. Every other Bit is
+fetched by being named; the Boss is fetched by the gate itself.
 
 | Tier | Bits | Rule |
 |---|---|---|
