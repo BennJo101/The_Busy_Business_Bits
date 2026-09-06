@@ -124,6 +124,10 @@ to them.
 Not a worker. The control surface — he lives in the console and runs the machine that
 runs the Bits.
 
+- **Summoning** — the roster buttons are one way in; asking him is the other. "Wizard,
+  get me the Coder", or just "Coder, look at this" into an empty room, and he casts for
+  real, then hands the job over by name so the Bit lands already holding it. "Send the
+  Reaper away" puts one back.
 - **Routines** — named multi-Bit macros on one word. "Okay… BAM!" and a whole sequence
   fires. See *Routines* below.
 - **Profiles** — desktop states. *Work* summons Boss, Coder, Secretary and opens the
@@ -132,7 +136,8 @@ runs the Bits.
 - **Install & wire** — dependencies, API keys, n8n webhook URLs, new Bits, new sprites.
   Anything that changes the system rather than using it.
 - **Routing** — an unaddressed request goes to whoever actually owns the verb. He's the
-  fallback when you don't know who to ask.
+  fallback when you don't know who to ask, and with nobody on screen he's the one who
+  answers, because he can fetch whoever the request was really for.
 
 ## The Ghost — *remember what you dropped*
 
@@ -185,7 +190,7 @@ The gate is what makes it safe to leave these running unattended.
 | Tier | Bits | Rule |
 |---|---|---|
 | **Read** | Investigator, Ghost, Librarian, Boss | Free rein. Can look at anything, change nothing. |
-| **Write** | Secretary, Librarian, Coder | Create and edit inside their scope. Reversible by definition. |
+| **Write** | Secretary, Librarian, Coder, Wizard | Create and edit inside their scope. Reversible by definition. Summoning sits here: it changes the desktop, and it undoes with a word. |
 | **Execute** | Coder, Wizard | Shell, installs, system settings. Shows the command before running it. |
 | **Send** | Courier | Anything leaving the machine. Always previewed, always Boss-gated. |
 | **Destroy** | Reaper | Proposes only. Never acts without Boss gate *and* your explicit word. |

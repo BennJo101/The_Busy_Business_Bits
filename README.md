@@ -22,7 +22,7 @@ Bits could plausibly own a job, the job is split wrong.
 | **Investigator** | dig | Fetches and reads web pages, extracts PDF text, hunts logs, builds dossiers from local files |
 | **Reaper** | cut | Disk audit, duplicate detection, startup items, abandoned programs, process control |
 | **Secretary** | schedule | Tasks with owners and dates, morning brief, end-of-day reckoning |
-| **Wizard** | orchestrate | Named multi-Bit routines, system state, scope management, installs |
+| **Wizard** | orchestrate | Summons and dismisses the other Bits on request, named multi-Bit routines, system state, installs |
 | **Ghost** | remember | Finds what stopped moving and makes you give it a verdict: revive, kill or haunt |
 | **Librarian** | file | Indexes documents, searches by name and content, tracks which version supersedes which |
 
@@ -51,11 +51,37 @@ python -m venv .venv
 ```
 
 Then double-click `Run The Bits.bat`, click **settings**, paste your API key,
-click **fetch models**, **save**. Click a name in the roster to summon that Bit.
+click **fetch models**, **save**. Click a name in the roster to summon that Bit —
+or just ask the Wizard, below.
 
 Settings are written to `~/.busy_business_bits.json` and working state to
 `~/.busy_business_bits/` — both deliberately outside the project folder, so
 neither an API key nor a task list can end up in a commit.
+
+## Summoning
+
+The roster down the left of the console is one way in. The other is to say so.
+
+```
+You:     Wizard, I need the Coder in here.
+Wizard:  Okay... BAM! Coder, take a look at this.
+Coder:   Give me the actual error, not the vibe of the error.
+```
+
+Summoning is a real tool the Wizard owns, not a line he says — he casts, the Bit
+lands on the sparkle at the end of the cast, and the handoff waits for it, so the
+arriving Bit picks the job up rather than the request falling on an empty desk.
+He can send one back the same way (*"Wizard, the Reaper's done"*), and he'll tell
+you plainly when he can't: no such Bit, already in the room, no sprites on disk.
+
+You don't have to name him. With nobody on screen, an unaddressed line goes to
+the Wizard rather than bouncing off a *summon a Bit first* message — so *"Coder,
+why is this failing?"* into an empty room fetches the Coder and hands him the
+question. Once Bits are on screen the routing is unchanged: they answer, and the
+Wizard only speaks when you call for him.
+
+This works in `Demo The Bits.bat` too, with no API key — it's the one thing in
+demo mode that actually happens rather than being canned.
 
 ## The four surfaces
 
@@ -103,7 +129,7 @@ they queue an approval that has to be cleared before anything happens.
 | Tier | Bits | Rule |
 |---|---|---|
 | Read | Investigator, Ghost, Librarian, Boss | Free rein. Looks at anything, changes nothing. |
-| Write | Secretary, Librarian, Coder | Creates and edits inside its scope. Reversible. |
+| Write | Secretary, Librarian, Coder, Wizard | Creates and edits inside its scope. Reversible. Summoning is here: it changes the desktop, and it undoes with a word. |
 | Execute | Coder, Wizard | Shell, installs, system settings. Gated. |
 | Send | Courier | Anything leaving the machine. Gated. |
 | Destroy | Reaper, Librarian, Courier | Proposes only. Gated, and deletions move to a dated graveyard rather than vanishing. |

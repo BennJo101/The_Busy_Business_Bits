@@ -1643,6 +1643,84 @@ def t_naming(bit, path=""):
 # ============================================================================
 # THE WIZARD - orchestrate. He runs the machine that runs the Bits.
 # ============================================================================
+# Summoning is the one verb of his that lives on screen rather than on disk, so
+# it needs a way back to the window layer. The app sets these; when nothing does
+# - bits_tools run on its own, or the selftest - the tools say so plainly rather
+# than pretending the cast worked.
+#
+#   ON_STAGE(action, bit_name) -> str      action is "summon" or "dismiss"
+#   STAGE_PRESENT() -> [bit_name, ...]     who is on the desktop right now
+ON_STAGE = None
+STAGE_PRESENT = None
+
+NO_STAGE = "the room isn't listening - there's no desktop to cast onto."
+
+
+def _stage(action, name):
+    if ON_STAGE is None:
+        return NO_STAGE
+    try:
+        return ON_STAGE(action, name)
+    except Exception as e:                                        # noqa: BLE001
+        return "the cast failed: %r" % e
+
+
+def present_bits():
+    """Who is on screen, or None if nothing has told us."""
+    if STAGE_PRESENT is None:
+        return None
+    try:
+        return list(STAGE_PRESENT())
+    except Exception:                                             # noqa: BLE001
+        return None
+
+
+def resolve_bit(name):
+    """'coder', 'Coder', 'the coder' -> 'The Coder'. "" if there's no such Bit.
+
+    Loose on purpose: this is fed by a spoken line, not by a form.
+    """
+    want = re.sub(r"^(the|@)\s*", "", str(name).strip().lower()).strip(" .,'\"")
+    for full in DEFAULT_SCOPE:
+        if want in (full.lower(), full.lower().replace("the ", "")):
+            return full
+    return ""
+
+
+@tool("summon_bit", "Bring a Bit onto the desktop so it can answer for itself. Cast "
+      "this whenever someone asks for a Bit by name, or asks for work that belongs to "
+      "a Bit who isn't in the room yet - then address that Bit by name in the very "
+      "same reply, so they pick the job up as they land.",
+      WRITE, "The Wizard", {"name": _str("Which Bit, e.g. 'Coder' or 'The Reaper'.")},
+      ["name"])
+def t_summon(bit, name):
+    who = resolve_bit(name)
+    if not who:
+        return "there is no Bit called '%s'. The roster is: %s" % (
+            name, ", ".join(sorted(n.replace("The ", "") for n in DEFAULT_SCOPE)))
+    if who == "The Wizard":
+        return "you are the Wizard. You are the console - you're always here."
+    here = present_bits()
+    if here is not None and who in here:
+        return "%s is already in the room. Just talk to them." % who
+    return _stage("summon", who)
+
+
+@tool("dismiss_bit", "Send a Bit back where it came from. Use it when its work is "
+      "done and it's cluttering the desk, or when asked to.",
+      WRITE, "The Wizard", {"name": _str("Which Bit, e.g. 'Coder'.")}, ["name"])
+def t_dismiss(bit, name):
+    who = resolve_bit(name)
+    if not who:
+        return "there is no Bit called '%s'." % name
+    if who == "The Wizard":
+        return "you can't dismiss yourself. You are the console."
+    here = present_bits()
+    if here is not None and who not in here:
+        return "%s isn't here to dismiss." % who
+    return _stage("dismiss", who)
+
+
 ROUTINES = {
     "morning": ["The Secretary: morning_brief", "The Boss: metrics_pulse",
                 "The Ghost: one abandoned thing"],
@@ -1702,10 +1780,12 @@ def t_sysstate(bit):
     return "\n".join(out)
 
 
-@tool("bit_status", "What each Bit is pointed at, and whether it has anything waiting.",
+@tool("bit_status", "Who is on the desktop right now, what each Bit is pointed at, "
+      "and whether it has anything waiting. Check here before you summon anyone.",
       READ, "The Wizard", {}, [])
 def t_bitstatus(bit):
     scopes = _load(SCOPES_PATH, {})
+    here = present_bits()
     pend = {}
     for i in _approvals()["items"]:
         if i["state"] == "pending":
@@ -1713,9 +1793,16 @@ def t_bitstatus(bit):
     rows = []
     for name in DEFAULT_SCOPE:
         n = len([t for t in TOOLS.values() if t.owner == name])
-        rows.append("%-18s %2d tools  scope: %-42s %s"
-                    % (name, n, (scopes.get(name) or DEFAULT_SCOPE[name])[:42],
+        if here is None or name == "The Wizard":
+            where = "  "             # nothing is telling us, or he is the console
+        else:
+            where = "on" if name in here else "--"
+        rows.append("%-3s %-18s %2d tools  scope: %-42s %s"
+                    % (where, name, n,
+                       (scopes.get(name) or DEFAULT_SCOPE[name])[:42],
                        ("%d pending" % pend[name]) if name in pend else ""))
+    if here is not None:
+        rows.append("('on' = in the room and can be spoken to; '--' = not summoned)")
     return "\n".join(rows)
 
 

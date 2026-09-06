@@ -12,6 +12,7 @@ Requires: Python 3.8+, Pillow.       Run:  python busy_business_bits.py
 import os
 import queue
 import random
+import re
 import subprocess
 import sys
 import threading
@@ -124,6 +125,9 @@ from bits_core import (  # noqa: E402
     find_addressees, list_models, load_settings, pick_default_model,
     save_settings, synth_voice,
 )
+# already imported (or already failed to import) inside bits_core, so take its
+# copy rather than risk a second, differently-configured module object
+from bits_core import bits_tools  # noqa: E402
 
 CARD = 260          # rendered sprite size, px
 CHAT_H = 7          # transcript rows
@@ -598,6 +602,11 @@ class App:
         self._slot = 0
         self.results = queue.Queue()
         self._pending = {}          # summoned, mid-cast, not yet on screen
+        self._quiet_cast = set()    # cast by the Wizard mid-line; he'll say it himself
+        if bits_tools:
+            # the Wizard's summon_bit / dismiss_bit reach the screen through here
+            bits_tools.ON_STAGE = self._stage_request
+            bits_tools.STAGE_PRESENT = self.present
         try:
             self.ambient = bits_ambient.Ambient() if bits_ambient else None
         except Exception:                                         # noqa: BLE001
@@ -635,10 +644,14 @@ class App:
         else:
             self.summon(name)
 
-    def summon(self, name):
+    def summon(self, name, quiet=False):
+        """`quiet` means the Wizard cast this one mid-sentence, so his own reply
+        carries the BAM and _land shouldn't say it a second time."""
         if (name == HOST or name in self.windows or name in self._pending
                 or not self.sprites.get(name, {}).get("idle")):
             return
+        if quiet:
+            self._quiet_cast.add(name)
         n = self._slot
         self._slot += 1
         sx, sy = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
@@ -669,6 +682,32 @@ class App:
         cue = self.console.wizard_flourish(self.sprites.get("The Wizard", {}))
         self.root.after(max(0, cue), lambda: self._land(name))
 
+    def _stage_request(self, action, name):
+        """The Wizard casting from inside a reply, rather than from the roster.
+
+        Called on his worker thread, so it decides what it can from plain data
+        and hands the window work to the main thread. What it returns is what
+        he reads off the tool, so it has to be a sentence he can act on.
+        """
+        if name == HOST or name not in BITS:
+            return "%s isn't one of the Bits." % name
+        if action == "dismiss":
+            if name not in self.windows and name not in self._pending:
+                return "%s isn't here." % name
+            self.root.after(0, lambda: self.dismiss(name))
+            return "%s is on the way out." % name
+        if not self.sprites.get(name, {}).get("idle"):
+            return ("%s has no sprites on disk yet - there's nothing to summon."
+                    % SHORT[name])
+        if name in self.windows:
+            return "%s is already in the room." % name
+        if name in self._pending:
+            return "%s is already mid-cast and about to land." % name
+        # he is mid-line, so let his own reply be the BAM rather than doubling it
+        self.root.after(0, lambda: self.summon(name, quiet=True))
+        return ("%s is arriving on the sparkle. Address them by name in this very "
+                "reply and they'll pick it up as they land." % name)
+
     def _land(self, name):
         """The BAM. Fires on the sparkle peak, with the cast still playing."""
         xy = self._pending.pop(name, None)
@@ -676,9 +715,13 @@ class App:
             return                  # dismissed or cancelled mid-cast
         self.windows[name] = BitWindow(self, name, xy[0], xy[1])
         self.console.room_sys("Okay... BAM! %s is in." % SHORT[name])
-        self._speak_line("The Wizard", "Okay... BAM!", to_window=False)
+        quiet = name in self._quiet_cast     # he cast this one mid-sentence
+        self._quiet_cast.discard(name)
+        if not quiet:
+            self._speak_line("The Wizard", "Okay... BAM!", to_window=False)
 
     def dismiss(self, name):
+        self._quiet_cast.discard(name)
         if name in self._pending:                 # still mid-cast; call it off
             self._pending.pop(name, None)
             self.console.set_active(name, False)
@@ -700,9 +743,11 @@ class App:
         return list(self.windows.keys())
 
     def addressable(self):
-        """Everyone you can talk to: the summoned Bits, plus the Wizard, who is
-        always in the console even though he has no window."""
-        return self.present() + [HOST]
+        """Everyone you can talk to: the summoned Bits, plus the ones still mid-
+        cast - the Wizard hands off to those in the same breath as summoning
+        them - plus the Wizard himself, who is always in the console even
+        though he has no window."""
+        return self.present() + list(self._pending) + [HOST]
 
     # -- conversation -------------------------------------------------------
     def user_says(self, text, to=None):
@@ -712,13 +757,17 @@ class App:
         if to:
             targets = [to]
         else:
-            # the Wizard answers when you name him, but he is never the
-            # fall-through target - an unaddressed line goes to the Bits
+            # the Wizard answers when you name him. He is the fall-through
+            # only for an empty room, where he's the one who can fetch someone
             named = find_addressees(text, self.addressable())
-            targets = named[:2] if named else (present[:1] if present else [])
-        if not targets:
-            self.console.room_sys('summon a Bit first, or say "Wizard, ...".')
-            return
+            if named:
+                targets = named[:2]
+            elif present:
+                targets = present[:1]
+            else:
+                # nothing on screen to answer, so it goes to the Wizard - who can
+                # summon whoever the line was really for and hand it straight on
+                targets = [HOST]
         # every Bit still *hears* the whole room - room_log is what gets sent to
         # the API - but a Bit's window only shows its own thread with you, so
         # only the Bits expected to answer echo your line
@@ -773,6 +822,13 @@ class App:
         name, depth = self.turn_q.get()
         w = self.windows.get(name)
         if w is None and name != HOST:
+            if name in self._pending:
+                # summoned a moment ago and still inside the Wizard's cast. Hold
+                # the turn rather than dropping it - the handoff that comes with
+                # a summoning is the whole point of him being able to summon.
+                self.turn_q.put((name, depth))
+                self.root.after(200, self._drain)
+                return
             self._drain()
             return
         webhook = self.webhook_for(name)
@@ -1171,8 +1227,30 @@ DEMO_LINES = {
 
 def demo_reply(_key, _model, name, room_log, _present, _webhook=None,
                 on_tool=None):
+    """Canned lines - except the summoning, which is real even in demo mode.
+
+    Asking for a Bit by name is the first thing anyone tries, and a demo that
+    answered it with a canned quip would teach the wrong thing about the app.
+    So the Wizard reads the last line, works out who it wants, and casts.
+    """
     import time as _t
     _t.sleep(0.5)
+    if name == HOST and bits_tools:
+        said = next((t for who, t in reversed(room_log) if who != HOST), "")
+        wants = find_addressees(said, [b for b in BITS if b != HOST])
+        if wants:
+            who = wants[0]
+            away = re.search(r"dismiss|go away|send .{0,20}away|get rid of|"
+                             r"off you go|be gone", said, re.I)
+            call = "dismiss_bit" if away else "summon_bit"
+            if on_tool:
+                on_tool(HOST, call, {"name": SHORT[who]})
+            out = bits_tools.run_tool(HOST, call, {"name": SHORT[who]})
+            if not out.startswith(who):          # couldn't, and says why
+                return "The stars refuse me. " + out
+            if away:
+                return "Begone, %s. Okay... BAM!" % SHORT[who]
+            return "Okay... BAM! %s, you're up." % SHORT[who]
     pool = DEMO_LINES.get(name) or ["Right."]
     return pool[len([1 for s, _ in room_log if s == name]) % len(pool)]
 

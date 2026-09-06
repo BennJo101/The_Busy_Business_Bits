@@ -106,6 +106,39 @@ def test_gate():
           or "scope" in tools.run_tool("The Wizard", "bit_status", {}).lower())
 
 
+def test_summoning():
+    """The Wizard summoning by voice - the part the roster buttons never touch."""
+    print("summoning")
+    check("names resolve loosely",
+          [tools.resolve_bit(x) for x in ("coder", "The Coder", "the  reaper", "@ghost")]
+          == ["The Coder", "The Coder", "The Reaper", "The Ghost"],
+          [tools.resolve_bit(x) for x in ("coder", "The Coder", "the  reaper", "@ghost")])
+    check("a name nobody has resolves to nothing", tools.resolve_bit("the plumber") == "")
+
+    cast = []
+    tools.ON_STAGE = lambda action, name: cast.append((action, name)) or "%s is arriving." % name
+    tools.STAGE_PRESENT = lambda: ["The Boss"]
+    try:
+        out = tools.run_tool("The Wizard", "summon_bit", {"name": "coder"})
+        check("summoning reaches the screen", cast == [("summon", "The Coder")], cast)
+        check("and it isn't gated", "APPROVAL" not in out, out[:60])
+        check("someone already in the room isn't summoned twice",
+              "already" in tools.run_tool("The Wizard", "summon_bit", {"name": "Boss"}))
+        check("a Bit who isn't here can't be dismissed",
+              "isn't here" in tools.run_tool("The Wizard", "dismiss_bit", {"name": "Ghost"}))
+        check("dismissing reaches the screen",
+              "arriving" in tools.run_tool("The Wizard", "dismiss_bit", {"name": "Boss"})
+              and ("dismiss", "The Boss") in cast, cast)
+        check("bit_status says who is on screen",
+              "on  The Boss" in tools.run_tool("The Wizard", "bit_status", {}))
+        check("only the Wizard summons",
+              "isn't your job" in tools.run_tool("The Ghost", "summon_bit", {"name": "Boss"}))
+    finally:
+        tools.ON_STAGE = tools.STAGE_PRESENT = None
+    check("with no screen wired it says so, rather than lying",
+          tools.NO_STAGE in tools.run_tool("The Wizard", "summon_bit", {"name": "Coder"}))
+
+
 def test_sprites():
     print("sprites")
     sp = core.discover_sprites(os.path.dirname(os.path.abspath(__file__)))
@@ -115,7 +148,8 @@ def test_sprites():
 
 
 def main():
-    for t in (test_room_rules, test_ask_bit, test_ownership, test_gate, test_sprites):
+    for t in (test_room_rules, test_ask_bit, test_ownership, test_gate,
+              test_summoning, test_sprites):
         t()
     print()
     if FAILED:
