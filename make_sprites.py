@@ -288,36 +288,51 @@ OPEN_BOOK = [                   # what she is reading, lying on the desk
 ]
 OPEN_BOOK_X, OPEN_BOOK_Y = 27, 41
 
-# The raised arm, built the way the hand-drawn Bits do it: cardigan sleeve out
-# of the shoulder, ribbed cuff, then skin. The old version was skin all the way
-# down and only touched the body on its last row, so it read as a floating hand.
-# The bottom two rows deliberately overwrite the torso outline - that overlap is
-# what makes it look attached rather than adjacent.
-ARM_UP = [
-    ".OO.OO...",     # two fingertips, parted - the slit runs off the top edge
-    ".OFOFFO..",     # so it reads as fingers, not a hole punched in the hand
-    "OFFFFFO..",
-    "OFFFFFO..",
-    ".OFFFFO..",
-    ".OccccO..",     # cuff
-    ".OCCCCO..",
-    "..OCCCCO.",
-    "..OCCCCO.",
-    "...OCCCC.",     # merges into the shoulder
+# The hand is copied cell-for-cell off the Secretary's snap, which is the house
+# shape: a small fist two cells wide, with the notch and the thumb pixel beside
+# it. Anything invented here reads as some other gesture entirely - an earlier
+# attempt with the fingers parted came out as devil horns.
+HAND = [
+    "..OOO....",
+    ".OFFO....",
+    ".OFOFO...",     # notch, then the thumb
+    ".OFFO....",
 ]
-# the follow-through: hand drops a row and the fingers close
-ARM_SNAP = [
-    ".........",
-    "..OOOO...",
-    ".OFFFFO..",
-    "OFFFFFO..",
-    ".OFFFFO..",
-    ".OccccO..",
-    ".OCCCCO..",
-    "..OCCCCO.",
-    "..OCCCCO.",
-    "...OCCCC.",
-]
+# Where the hand sits in the 10-row block below, per lift step. She raises and
+# lowers across the loop the way the Secretary does, rather than snapping
+# between two poses.
+LIFT_TOP = {0: 5, 1: 3, 2: 0}
+ARM_W, ARM_H = 9, 10
+
+
+def arm_art(lift):
+    """Hand at the given height with the sleeve drawn to meet the shoulder.
+
+    Generated rather than hand-drawn so the sleeve can never come up short -
+    that gap is what made the old arm look like a floating hand.
+    """
+    g = [list("." * ARM_W) for _ in range(ARM_H)]
+    top = LIFT_TOP[lift]
+    for i, row in enumerate(HAND):
+        for x, ch in enumerate(row):
+            if ch != ".":
+                g[top + i][x] = ch
+    first = top + len(HAND)
+    n = ARM_H - first
+    for j in range(n):
+        r = first + j
+        x = 1 + round((j / max(1, n - 1)) * 2)      # drifts right toward the body
+        body = "c" if j == 0 and n > 1 else "C"     # ribbed cuff under the wrist
+        g[r][x] = "O"
+        if r >= ARM_H - 2:                          # merge into the torso: the
+            for c in range(x + 1, ARM_W - 1):       # overlap is what reads as
+                g[r][c] = "C"                       # attached
+        else:
+            g[r][x + 1] = g[r][x + 2] = body
+            g[r][x + 3] = "O"
+    return ["".join(r) for r in g]
+
+
 ARM_X, ARM_Y = 20, 33
 
 
@@ -360,7 +375,7 @@ LIB_X, LIB_Y = 25, 28
 
 
 def librarian_card(mouth=0, arms=0, book=0, blink=0, breath=0):
-    """arms: 0 down, 1 raised, 2 the snap follow-through."""
+    """arms: 0 down, then 1-3 for the hand low, mid and high."""
     g = blank_card()
     draw_text(g, SMALL, "The", THE_X, THE_ROW + 7, BLACK)
     w = text_width(LARGE, "Librarian")
@@ -368,7 +383,7 @@ def librarian_card(mouth=0, arms=0, book=0, blink=0, breath=0):
     # she settles a row as she breathes; the desk swallows the extra row
     stamp(g, librarian_art(mouth, blink), LIB_X, LIB_Y + breath)
     if arms:
-        stamp(g, ARM_SNAP if arms == 2 else ARM_UP, ARM_X, ARM_Y + breath)
+        stamp(g, arm_art(arms - 1), ARM_X, ARM_Y + breath)
     stamp(g, BOOKS, BOOKS_X, BOOKS_Y)
     if book:
         stamp(g, OPEN_BOOK, OPEN_BOOK_X, OPEN_BOOK_Y - (book - 1))
@@ -402,16 +417,16 @@ def states_for(which):
     blink = [0, 0, 0, 0, 0, 1, 0, 0]
     br = [0, 0, 1, 1, 1, 1, 0, 0]       # every frame must differ from the last,
     br2 = [0, 1] * 6                    # or Pillow folds them into one long one
-    snap = [1, 1, 2, 2]                 # raise, hold, snap, follow through
+    snap = [1, 2, 3, 3, 2, 1]           # the hand arcs up and back down
     return [
         ("idle_loop", [librarian_card(0, 0, 0, blink[i], br[i])
                        for i in range(8)], 330),
         ("talk_loop", [librarian_card(1 + i % 2, 0, 0, 0, br[i])
                        for i in range(6)], 330),
         # the arm carries the motion now, so the body can breathe calmly under it
-        ("snap_loop", [librarian_card(0, snap[i % 4], 0, blink[i % 8], br[i % 8])
+        ("snap_loop", [librarian_card(0, snap[i % 6], 0, blink[i % 8], br[i % 8])
                        for i in range(12)], 160),
-        ("snap_talk_loop", [librarian_card(1 + i % 2, snap[i % 4], 0, 0, br[i % 8])
+        ("snap_talk_loop", [librarian_card(1 + i % 2, snap[i % 6], 0, 0, br[i % 8])
                             for i in range(12)], 160),
         ("shelve_loop", [librarian_card(0, i % 2, 1, blink[i], br[i])
                          for i in range(8)], 330),
