@@ -184,6 +184,8 @@ def card(name_text, colour, art, x0, y0, shadow=None):
 
 
 def save_gif(path, grids, duration):
+    """`duration` is milliseconds per frame, or a list of one per frame - a
+    held pose is one long frame rather than the same frame drawn twice."""
     frames = [render(g) for g in grids]
     frames[0].save(path, save_all=True, append_images=frames[1:],
                    duration=duration, loop=0, disposal=2, optimize=False)
@@ -288,91 +290,94 @@ OPEN_BOOK = [                   # what she is reading, lying on the desk
 ]
 OPEN_BOOK_X, OPEN_BOOK_Y = 27, 41
 
-# Every pose here is sampled off the hand-drawn Bits rather than invented. The
-# snap is not one pose held and bobbed - that reads as a fist pump. Checking the
-# Boss's and the Secretary's frames end to end, it is three distinct beats:
+# Measured off the Secretary's snap frame by frame, not eyeballed. Tracking her
+# hand through the loop gives this, where the numbers are cells:
 #
-#   1. the wind-up   hand rises, fingers CURLED into a small fist
-#   2. the snap      hand flicks OPEN and DROPS, and two spark marks appear
-#                    above it - the sparks are what make it read as a snap
-#                    rather than a wave
-#   3. the release   hand stays open and lowers back down
+#   frame   top row   height   width
+#   0        43        1        3     at rest by the desk
+#   1-2      40        4        4     rising, still curled
+#   3-4      38        6        5     wind-up, held at the top
+#   5-6      39        5        7     THE SNAP - drops ONE row, WIDENS to 7
+#   7-8      41        3        6     falling
+#   9-10     42        2        5     nearly down
+#   11       43        1        3     rest
 #
-# It is deliberately asymmetric. Rising curled and falling open is the whole
-# gesture; loop it symmetrically and the character just pumps their fist.
-HAND_CURL = [
-    "..OOO....",
-    ".OFFO....",
-    ".OFOFO...",     # the notch, then the thumb
-    ".OFFO....",
+# The snap is the hand thrusting OUTWARD, away from the body: it barely moves
+# vertically - one row - while the silhouette goes from five cells to seven.
+# Reading it as a vertical move and swinging an open palm up and down the whole
+# range is how you end up raising the roof instead of snapping.
+HAND_CURL = [                       # narrow, fingers in - rising and falling
+    "....OOO....",
+    "...OFFO....",
+    "...OFOFO...",                  # the notch, then the thumb
+    "...OFFO....",
 ]
-HAND_OPEN = [
-    ".OOOO....",
-    ".OFFFO...",     # fingers flicked out flat
-    "..OOFFO..",
+HAND_SNAP = [                       # wide, flicked out to the side
+    ".OOOFO.....",
+    ".OFFFO.....",
+    "..OOFFO....",
 ]
-SPARKS = [
-    "..O..O...",
-    "...O.O...",
+SPARKS = [                          # her two marks, up and out from the hand
+    "O..O.......",
+    ".O.O.......",
 ]
-CURL_TOP = {0: 5, 1: 3, 2: 0}       # wind-up heights
-OPEN_TOP = {0: 6, 1: 4, 2: 3}       # the open hand always sits lower
-ARM_W, ARM_H = 9, 10
+ARM_W, ARM_H = 11, 14      # three rows of headroom above the hand
+                           # for the sparks to have somewhere to go
+SLEEVE_START, SLEEVE_END = 3, 5     # wrist column, then drift in to the shoulder
 
 
-def arm_art(pose="curl", lift=2, sparks=False):
-    """One frame of the arm: hand pose, how high it is, and the snap sparks.
+def arm_art(shape="curl", top=0, sparks=False):
+    """One frame of the arm. `top` is the hand's top row within the block.
 
     The sleeve is drawn from wherever the hand ends down to the shoulder, so it
     can never come up short - that gap is what made the first version look like
-    a floating hand.
+    a floating hand. Both hand shapes put the wrist in the same two cells, so
+    the sleeve meets either one.
     """
     g = [list("." * ARM_W) for _ in range(ARM_H)]
-    hand = HAND_OPEN if pose == "open" else HAND_CURL
-    top = (OPEN_TOP if pose == "open" else CURL_TOP)[lift]
+    hand = HAND_SNAP if shape == "snap" else HAND_CURL
     for i, row in enumerate(hand):
-        for x, ch in enumerate(row):
-            if ch != ".":
-                g[top + i][x] = ch
-    first = top + len(hand)
+        if 0 <= top + i < ARM_H:
+            for x, ch in enumerate(row):
+                if ch != ".":
+                    g[top + i][x] = ch
+    first = min(top + len(hand), ARM_H - 1)
     n = ARM_H - first
-    # start the sleeve directly under that pose's wrist, or it reads as two
-    # separate pieces; the open hand's wrist sits two cells further right
-    start = 3 if pose == "open" else 1
     for j in range(n):
         r = first + j
-        x = start + round((j / max(1, n - 1)) * (3 - start))
-        body = "c" if j == 0 and n > 1 else "C"     # ribbed cuff under the wrist
+        x = SLEEVE_START + round((j / max(1, n - 1)) * (SLEEVE_END - SLEEVE_START))
         g[r][x] = "O"
-        if r >= ARM_H - 2:                          # merge into the torso: the
-            for c in range(x + 1, ARM_W - 1):       # overlap is what reads as
-                g[r][c] = "C"                       # attached
+        if r >= ARM_H - 2:                      # merge into the torso; the
+            for c in range(x + 1, ARM_W - 1):   # overlap is what reads as
+                g[r][c] = "C"                   # attached
         else:
+            body = "c" if j == 0 and n > 2 else "C"     # ribbed cuff at the wrist
             g[r][x + 1] = g[r][x + 2] = body
             g[r][x + 3] = "O"
     if sparks:
         for i, row in enumerate(SPARKS):
-            for x, ch in enumerate(row):
-                if ch != "." and top - 3 + i >= 0:
-                    g[top - 3 + i][x] = ch
+            r = top - 3 + i
+            if 0 <= r < ARM_H:
+                for x, ch in enumerate(row):
+                    if ch != ".":
+                        g[r][x] = ch
     return ["".join(r) for r in g]
 
 
-# The choreography, beat for beat off the Secretary's twelve frames.
+# Her choreography, with her timing: a slow wind-up, a fast snap, an unhurried
+# drop. Held frames are one frame with a longer duration rather than repeats.
 SNAP_SCRIPT = [
-    ("curl", 0, False),     # rising
-    ("curl", 1, False),
-    ("curl", 2, False),     # wind-up, held
-    ("curl", 2, False),
-    ("open", 2, True),      # THE SNAP - flicks open, sparks
-    ("open", 1, False),     # release
-    ("open", 1, False),
-    ("open", 0, False),     # lowering
-    ("open", 0, False),
-    ("curl", 0, False),     # back to rest
+    ("curl", 8, False, 200),
+    ("curl", 5, False, 200),
+    ("curl", 3, False, 280),        # wind-up, held at the top
+    ("snap", 4, True,  160),        # THE SNAP - one row down, thrust outward
+    ("snap", 4, False, 160),        # sparks gone, hand still out
+    ("curl", 6, False, 200),
+    ("curl", 7, False, 200),
+    ("curl", 8, False, 280),
 ]
 
-ARM_X, ARM_Y = 20, 33
+ARM_X, ARM_Y = 18, 30
 
 
 def librarian_art(mouth=0, blink=0):
@@ -422,7 +427,7 @@ def librarian_card(mouth=0, arm=None, book=0, blink=0, breath=0):
     # she settles a row as she breathes; the desk swallows the extra row
     stamp(g, librarian_art(mouth, blink), LIB_X, LIB_Y + breath)
     if arm:
-        stamp(g, arm_art(*arm), ARM_X, ARM_Y + breath)
+        stamp(g, arm_art(arm[0], arm[1], arm[2]), ARM_X, ARM_Y + breath)
     stamp(g, BOOKS, BOOKS_X, BOOKS_Y)
     if book:
         stamp(g, OPEN_BOOK, OPEN_BOOK_X, OPEN_BOOK_Y - (book - 1))
@@ -462,12 +467,15 @@ def states_for(which):
         ("talk_loop", [librarian_card(1 + i % 2, 0, 0, 0, br[i])
                        for i in range(6)], 330),
         # the arm carries the motion now, so the body can breathe calmly under it
-        ("snap_loop", [librarian_card(0, SNAP_SCRIPT[i], 0, blink[i % 8], br[i % 8])
-                       for i in range(len(SNAP_SCRIPT))], 160),
-        ("snap_talk_loop", [librarian_card(1 + i % 2, SNAP_SCRIPT[i], 0, 0, br[i % 8])
-                            for i in range(len(SNAP_SCRIPT))], 160),
+        # each pose carries its own length - a held wind-up is one long frame
+        # rather than the same frame twice
+        ("snap_loop", [librarian_card(0, a, 0, 0, 0) for a in SNAP_SCRIPT],
+         [a[3] for a in SNAP_SCRIPT]),
+        ("snap_talk_loop", [librarian_card(1 + i % 2, a, 0, 0, 0)
+                            for i, a in enumerate(SNAP_SCRIPT)],
+         [a[3] for a in SNAP_SCRIPT]),
         # shelving: she reaches for the book rather than snapping
-        ("shelve_loop", [librarian_card(0, ("open", i % 2, False), 1, blink[i], br[i])
+        ("shelve_loop", [librarian_card(0, ("curl", 7 + i % 2, False), 1, blink[i], br[i])
                          for i in range(8)], 330),
     ]
 
@@ -486,8 +494,9 @@ def main():
         for suffix, grids, dur in states_for(short):
             p = os.path.join(d, "%s_%s.gif" % (short, suffix))
             save_gif(p, grids, dur)
+            total = sum(dur) if isinstance(dur, list) else dur * len(grids)
             print("  %s  (%d frames, %dms)"
-                  % (os.path.relpath(p, HERE), len(grids), dur))
+                  % (os.path.relpath(p, HERE), len(grids), total))
 
 
 if __name__ == "__main__":
