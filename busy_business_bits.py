@@ -669,9 +669,21 @@ class App:
         present = self.addressable()
         model = self.settings.get("model") or ""
 
+        def note_tool(bit, tool_name, args):
+            """A Bit reaching for a tool, echoed to the console so a ten-second
+            pause reads as work rather than as the app having hung."""
+            detail = ""
+            for k in ("path", "cmd", "query", "url", "subject", "name", "pattern"):
+                if args.get(k):
+                    detail = " %s" % str(args[k])[:48]
+                    break
+            self.root.after(0, lambda: self.console.room_sys(
+                "%s ... %s%s" % (SHORT.get(bit, bit), tool_name, detail)))
+
         def work():
             try:
-                reply = ask_bit(key, model, name, snapshot, present, webhook)
+                reply = ask_bit(key, model, name, snapshot, present, webhook,
+                                on_tool=note_tool)
                 self.results.put(("ok", name, depth, reply))
             except ApiError as e:
                 self.results.put(("err", name, depth, str(e)))
@@ -1030,7 +1042,8 @@ DEMO_LINES = {
 }
 
 
-def demo_reply(_key, _model, name, room_log, _present, _webhook=None):
+def demo_reply(_key, _model, name, room_log, _present, _webhook=None,
+                on_tool=None):
     import time as _t
     _t.sleep(0.5)
     pool = DEMO_LINES.get(name) or ["Right."]
