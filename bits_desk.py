@@ -12,8 +12,11 @@ The board speaks one JSON object per line over the USB serial it is already
 plugged into. No wifi, so no credentials, no network, nothing to configure.
 """
 import json
+import subprocess
+import sys
 import threading
 import time
+import os
 
 try:
     import serial
@@ -48,13 +51,16 @@ def _ports():
 class Desk:
     """The board, if it is there. Every method is safe when it isn't."""
 
-    def __init__(self, on_rule=None, on_note=None):
+    def __init__(self, on_rule=None, on_note=None, on_start=None):
         self.on_rule = on_rule          # (approval_id, approved) -> None
         self.on_note = on_note          # (text) -> None, for the console
+        self.on_start = on_start        # () -> None, the START button
         self.port = ""
         self.ser = None
         self.on = False
         self.carrying = 0               # files the board's SD card is holding
+        self._waits = {}                # radio calls waiting on an answer
+        self._seq = 0
         self._last_room = None
         self._last_ask = None
         self._lock = threading.Lock()
@@ -159,7 +165,17 @@ class Desk:
             msg = json.loads(raw.decode("utf-8", "replace").strip())
         except Exception:                                         # noqa: BLE001
             return                          # the boot banner, mostly
-        if msg.get("t") == "rule":
+        kind = msg.get("t")
+        if kind == "radio":
+            wait = self._waits.get(msg.get("id"))
+            if wait:
+                wait[1] = msg
+                wait[0].set()
+        elif kind == "start":
+            self._last_ask = None
+            if self.on_start:
+                self.on_start()
+        elif kind == "rule":
             self._last_ask = None          # it has cleared its own screen
             if self.on_rule:
                 self.on_rule(msg.get("id"), bool(msg.get("ok")))
@@ -178,6 +194,34 @@ class Desk:
 
     def here(self):
         return bool(self.ser)
+
+    def radio(self, do, timeout=40.0, **args):
+        """Ask the board to use its own WiFi or Bluetooth, and wait.
+
+        Called from a Bit's worker thread, which is already blocked on its own
+        turn - so blocking here costs nothing that wasn't already being waited
+        on. Returns the board's answer, or a dict saying why not.
+        """
+        if not self.here():
+            return {"ok": False, "error": "no desk unit plugged in"}
+        with self._lock:
+            self._seq += 1
+            call_id = self._seq
+        gate = [threading.Event(), None]
+        self._waits[call_id] = gate
+        try:
+            if not self.send({"t": "radio", "id": call_id, "do": do,
+                              "args": args}):
+                return {"ok": False, "error": "the desk unit stopped listening"}
+            if not gate[0].wait(timeout):
+                return {"ok": False, "error": "the desk unit didn't answer in "
+                                              "%ds" % int(timeout)}
+            msg = gate[1] or {}
+            if not msg.get("ok"):
+                return {"ok": False, "error": msg.get("error", "it wouldn't say")}
+            return {"ok": True, "out": msg.get("out")}
+        finally:
+            self._waits.pop(call_id, None)
 
     def note(self, text):
         if self.on_note:
@@ -235,3 +279,43 @@ def _detail(item):
                 return head + (" (+%d more)" % (len(v) - 3) if len(v) > 3 else "")
             return str(v)
     return item.get("summary", "")
+
+
+def watch():
+    """Wait for START on the board, then start the Bits.
+
+        python bits_desk.py
+
+    For a computer the Bits are not running on yet - the board is plugged in,
+    the screen says START, and pressing it brings them up. The watcher hands
+    the port over as it goes: the app wants it for the gate, and two things
+    cannot hold one serial port.
+    """
+    import os
+    import subprocess
+    import sys
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    app = os.path.join(here, "busy_business_bits.py")
+    if not os.path.isfile(app):
+        sys.exit("busy_business_bits.py isn't next to this file.")
+
+    pressed = threading.Event()
+    desk = Desk(on_start=pressed.set, on_note=lambda t: print(t))
+    if not desk.start():
+        sys.exit("this needs pyserial:  pip install pyserial")
+    print("waiting for START on the desk unit. Ctrl-C to give up.")
+    try:
+        while not pressed.wait(0.5):
+            pass
+    except KeyboardInterrupt:
+        desk.stop()
+        return
+    print("starting the Bits...")
+    desk.stop()
+    time.sleep(0.8)                 # let the port go before the app wants it
+    subprocess.Popen([sys.executable, app], cwd=here)
+
+
+if __name__ == "__main__":
+    watch()

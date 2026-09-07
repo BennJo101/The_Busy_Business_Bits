@@ -428,10 +428,64 @@ def test_vault():
         shutil.rmtree(made, ignore_errors=True)
 
 
+def test_radios():
+    """The board's WiFi and Bluetooth, and the toggle that uses them."""
+    print("the board's radios")
+    import bits_desk
+
+    owners = {n: tools.TOOLS[n].owner for n in
+              ("wifi_scan", "bluetooth_scan", "board_network", "board_join",
+               "board_leave")}
+    check("seeing what is out there is the Investigator's",
+          owners["wifi_scan"] == owners["bluetooth_scan"] == "The Investigator",
+          owners)
+    check("wiring the board onto a network is the Wizard's",
+          owners["board_network"] == owners["board_join"] == "The Wizard", owners)
+    check("joining a network needs the Boss",
+          tools.TOOLS["board_join"].tier in tools.GATED,
+          tools.TOOLS["board_join"].tier)
+    check("but looking does not",
+          tools.TOOLS["wifi_scan"].tier not in tools.GATED)
+
+    check("with no board they say so rather than failing",
+          tools.NO_RADIO in tools.run_tool("The Investigator", "wifi_scan", {}))
+
+    asked = []
+    tools.ON_RADIO = lambda do, timeout=0, **a: (asked.append((do, a))
+                                                 or {"ok": True, "out": []})
+    try:
+        out = tools.run_tool("The Investigator", "wifi_scan", {})
+        check("a scan reaches the board", asked and asked[0][0] == "scan", asked)
+        check("and an empty sky is said plainly", "nothing at all" in out, out[:60])
+        asked[:] = []
+        tools.run_tool("The Investigator", "bluetooth_scan", {"seconds": 99})
+        check("a bluetooth scan is capped at ten seconds",
+              asked and asked[0][1].get("seconds") == 10, asked)
+
+        # the toggle: over the board, and never quietly back to this machine
+        tools.USE_BOARD_NET = True
+        tools.ON_RADIO = lambda do, timeout=0, **a: {"ok": False,
+                                                     "error": "not on a network"}
+        out = tools.run_tool("The Investigator", "fetch_url",
+                             {"url": "example.com"})
+        check("with the toggle on and no board network, it refuses",
+              "not on a network" in out and "example.com" not in out.lower()[:40],
+              out[:80])
+        check("and says how to undo it", "turn that setting off" in out)
+    finally:
+        tools.ON_RADIO = None
+        tools.USE_BOARD_NET = False
+
+    d = bits_desk.Desk()
+    check("asking a board that isn't there is answered, not hung",
+          d.radio("scan", timeout=1).get("ok") is False)
+
+
 def main():
     for t in (test_room_rules, test_ask_bit, test_ownership, test_gate,
               test_summoning, test_sprites, test_routing, test_the_floor,
-              test_layout, test_wake, test_desk, test_vault, test_party):
+              test_layout, test_wake, test_desk, test_vault, test_radios,
+              test_party):
         t()
     print()
     if FAILED:

@@ -966,6 +966,8 @@ class App:
             bits_tools.STAGE_PRESENT = self.present
             bits_tools.ON_APPROVAL_NEEDED = self._approval_raised
             bits_tools.ON_FLOOR = self._floor_request
+            bits_tools.ON_RADIO = self._desk_radio
+            bits_tools.USE_BOARD_NET = bool(self.settings.get("board_net"))
         try:
             self.ambient = bits_ambient.Ambient() if bits_ambient else None
         except Exception:                                         # noqa: BLE001
@@ -974,6 +976,7 @@ class App:
         try:
             self.desk = bits_desk.Desk(
                 on_rule=self._desk_ruled,
+                on_start=self._desk_start,
                 on_note=lambda t: self.root.after(
                     0, lambda: self.console.room_sys(t))) if bits_desk else None
         except Exception:                                         # noqa: BLE001
@@ -1253,6 +1256,37 @@ class App:
                     if i["state"] == "pending"]
         except Exception:                                         # noqa: BLE001
             return []
+
+    def _desk_radio(self, do, timeout=40.0, **args):
+        """A Bit reaching for the board's own WiFi or Bluetooth.
+
+        Called on that Bit's worker thread and answered there - the desk unit
+        is the only thing that can see those radios, and the Bit is waiting on
+        its own turn anyway.
+        """
+        if not self.desk:
+            return {"ok": False, "error": bits_tools.NO_RADIO}
+        return self.desk.radio(do, timeout=timeout, **args)
+
+    def _desk_start(self):
+        """The START button. Called from the desk unit's reader thread."""
+        self.root.after(0, self._wake_console)
+
+    def _wake_console(self):
+        """Put the Wizard in front of you, wherever the window had got to."""
+        try:
+            # deiconify is enough even when it is minimised: the <Map> that
+            # follows is what gives the borderless frame back. minimize() does
+            # not toggle, so calling it here would put it away again.
+            self.root.deiconify()
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.after(400, lambda: self.root.attributes("-topmost", False))
+            self.console.entry.focus_force()
+            self.console.wizard_flourish(self.sprites.get(HOST, {}))
+            self.console.room_sys("summoned from the desk unit.")
+        except Exception:                                         # noqa: BLE001
+            pass
 
     def _desk_ruled(self, approval_id, ok):
         """A button on the desk unit. Called from its reader thread."""
@@ -1856,12 +1890,14 @@ class SettingsDialog(tk.Toplevel):
         self.chatter = tk.BooleanVar(value=app.settings.get("chatter", True))
         self.ambient = tk.BooleanVar(value=app.settings.get("ambient", True))
         self.wake = tk.BooleanVar(value=app.settings.get("wake", True))
+        self.board_net = tk.BooleanVar(value=app.settings.get("board_net", False))
         word = (app.settings.get("wake_word") or WAKE_WORD)
         for i, (var, label) in enumerate([
             (self.voices, "garbled voices"),
             (self.chatter, "let Bits answer each other"),
             (self.ambient, "let Bits speak up on their own"),
             (self.wake, 'listen for "%s"' % word),
+            (self.board_net, "the Bits' web goes over the desk unit's WiFi"),
         ]):
             tk.Checkbutton(self, text=label, variable=var, bg=FRAME_DARK, fg=PAPER,
                            selectcolor=INK, activebackground=FRAME_DARK,
@@ -1870,19 +1906,19 @@ class SettingsDialog(tk.Toplevel):
                                                       padx=12, pady=2)
         tk.Label(self, text="   the mic stays open and each phrase is transcribed"
                             " by Google", bg=FRAME_DARK, fg="#8a7d70",
-                 font=("Consolas", 7, "italic")).grid(row=10, column=0,
+                 font=("Consolas", 7, "italic")).grid(row=11, column=0,
                                                       sticky="w", padx=14)
 
         # --- per-Bit n8n webhooks -------------------------------------------
         tk.Label(self, text="Per-Bit n8n webhooks", bg=FRAME_DARK, fg="#e8d9b8",
-                 font=("Consolas", 9, "bold")).grid(row=11, column=0, sticky="w",
+                 font=("Consolas", 9, "bold")).grid(row=12, column=0, sticky="w",
                                                     padx=14, pady=(12, 0))
         tk.Label(self, text="blank = use the shared API key above",
                  bg=FRAME_DARK, fg="#8a7d70", font=("Consolas", 7, "italic")
-                 ).grid(row=12, column=0, columnspan=2, sticky="w", padx=14)
+                 ).grid(row=13, column=0, columnspan=2, sticky="w", padx=14)
 
         hooks = tk.Frame(self, bg=FRAME_DARK)
-        hooks.grid(row=13, column=0, columnspan=2, sticky="we", padx=14, pady=(4, 0))
+        hooks.grid(row=14, column=0, columnspan=2, sticky="we", padx=14, pady=(4, 0))
         saved = app.settings.get("webhooks") or {}
         self.hooks = {}
         for i, name in enumerate(available_bits(app.sprites)):
@@ -1898,7 +1934,7 @@ class SettingsDialog(tk.Toplevel):
             self.hooks[name] = e
 
         bar = tk.Frame(self, bg=FRAME_DARK)
-        bar.grid(row=14, column=0, columnspan=2, sticky="e", padx=14, pady=12)
+        bar.grid(row=15, column=0, columnspan=2, sticky="e", padx=14, pady=12)
         tk.Button(bar, text="cancel", bg="#3d2f34", fg=PAPER, bd=0, cursor="hand2",
                   font=("Consolas", 9), command=self.destroy).pack(side="left", padx=4, ipadx=8)
         tk.Button(bar, text="save", bg=FRAME_GOLD, fg=INK, bd=0, cursor="hand2",
@@ -1906,7 +1942,7 @@ class SettingsDialog(tk.Toplevel):
 
         self.status = tk.Label(self, text="", bg=FRAME_DARK, fg="#8a7d70",
                                font=("Consolas", 8))
-        self.status.grid(row=15, column=0, columnspan=2, sticky="w", padx=14, pady=(0, 8))
+        self.status.grid(row=16, column=0, columnspan=2, sticky="w", padx=14, pady=(0, 8))
 
     def _fetch(self):
         k = self.key.get().strip()
@@ -1950,6 +1986,9 @@ class SettingsDialog(tk.Toplevel):
         s["chatter"] = bool(self.chatter.get())
         s["ambient"] = bool(self.ambient.get())
         s["wake"] = bool(self.wake.get())
+        s["board_net"] = bool(self.board_net.get())
+        if bits_tools:
+            bits_tools.USE_BOARD_NET = s["board_net"]
         s["webhooks"] = hooks
         save_settings(s)
         if s["wake"]:

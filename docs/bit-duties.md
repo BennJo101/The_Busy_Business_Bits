@@ -59,6 +59,8 @@ the numbers.
 - **The card** — with an SD card in the board, the desk unit carries the whole
   project, sprites and all, and hands it to any computer it is plugged into.
   That is the Courier's verb rather than the Boss's, but it is the Boss's box.
+- **The light** — flashing yellow while something waits on you, one green flash
+  when you approve it, one red when you don't.
 
 ## The Coder — *build*
 
@@ -101,6 +103,10 @@ Librarian — that's the whole boundary between them.)
   for X", due diligence before you sign anything.
 - **Root cause** — hand him a recurring problem and he goes through logs, history and
   files until he can say *why*, not *what*. He'll tell you what he'd check next.
+- **The air** — with the desk unit plugged in he can hear what is around *the board*:
+  `wifi_scan` for the networks in range, `bluetooth_scan` for what is advertising
+  itself. Outward-pointing, like everything else of his — and a different radio from
+  the computer's, which is the point of it.
 
 ## The Reaper — *cut*
 
@@ -149,7 +155,10 @@ runs the Bits.
   app set. *Deep* dismisses everyone but Coder and mutes ambient. *Shutdown* runs the
   end-of-day chain and clears the screen.
 - **Install & wire** — dependencies, API keys, n8n webhook URLs, new Bits, new sprites.
-  Anything that changes the system rather than using it.
+  Anything that changes the system rather than using it. That now includes the desk
+  unit's own radio: `board_join` puts the board on a wireless network so the Bits can
+  reach the web over it instead of over the computer, and it is gated, so the board
+  ends up asking your permission on its own screen.
 - **Routing** — every unaddressed line comes to him first. The console is his desk, so
   he reads it and either answers it or hands it to whoever actually owns the verb,
   fetching them if they aren't on screen. If he can't tell whose it is, it goes to the

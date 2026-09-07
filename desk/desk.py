@@ -124,7 +124,24 @@ class Desk:
             d.text(line, 8, y, self.PAPER, self.INK)
             y += 14
         d.text("carrying the Bits - %d files" % self.carrying if self.carrying
-               else "nothing needs you", 8, T.H - 18, self.DIM, self.INK)
+               else "nothing needs you", 8, 154, self.DIM, self.INK)
+        self.start_button()
+
+    def start_button(self, hit=False):
+        """The way in. Tapping it opens the Wizard on the computer."""
+        d = self.d
+        c = self.GOLD if hit else self.DARK
+        d.fill(0, 174, T.W, 66, c)
+        label = "START"
+        d.text(label, (T.W - 8 * len(label) * 2) // 2, 198,
+               self.INK if hit else self.GOLD, c, 2)
+
+    def busy(self, what):
+        """Say what the radio is doing. A four-second scan on a frozen screen
+        looks like a crash; the same four seconds with a word on it does not."""
+        d = self.d
+        d.fill(0, 174, T.W, 66, self.INK)
+        d.text(what[:34], 8, 198, self.GOLD, self.INK)
 
     def draw_ask(self):
         d, a = self.d, self.ask
@@ -151,6 +168,7 @@ class Desk:
                    self.INK if on else self.PAPER, c, 2)
 
     def flash(self, ok):
+        """One flash of the ruling: green for yes, red for no, then out."""
         self.buttons("yes" if ok else "no")
         self.lamp(g=ok, r=not ok)
         self.flash_until = time.ticks_add(time.ticks_ms(), 700)
@@ -162,6 +180,45 @@ class Desk:
 
     def send(self, obj):
         print(json.dumps(obj))
+
+    def radio(self, msg):
+        """Anything that needs the board's own WiFi or Bluetooth.
+
+        Answered in one call with the id it came in with, because the computer
+        blocks a Bit's turn waiting for it.
+        """
+        import radio as R
+        do = msg.get("do") or ""
+        args = msg.get("args") or {}
+        self.busy({"scan": "scanning for networks...",
+                   "bt": "listening for Bluetooth...",
+                   "connect": "joining %s..." % args.get("ssid", ""),
+                   "get": "fetching over the board..."}.get(do, do))
+        try:
+            if do == "scan":
+                out = R.scan(int(args.get("limit", 14)))
+            elif do == "status":
+                out = R.status()
+            elif do == "connect":
+                out = R.connect(args.get("ssid", ""), args.get("password", ""),
+                                int(args.get("seconds", 18)))
+            elif do == "forget":
+                out = R.forget()
+            elif do == "bt":
+                out = R.bt_scan(float(args.get("seconds", 4)),
+                                int(args.get("limit", 14)))
+            elif do == "get":
+                out = R.get(args.get("url", ""), int(args.get("limit", 4000)))
+            else:
+                self.send({"t": "radio", "id": msg.get("id"), "ok": False,
+                           "error": "no such radio call: %s" % do})
+                self.dirty = True
+                return
+            self.send({"t": "radio", "id": msg.get("id"), "ok": True, "out": out})
+        except Exception as e:
+            self.send({"t": "radio", "id": msg.get("id"), "ok": False,
+                       "error": repr(e)})
+        self.dirty = True
 
     def handle(self, msg):
         kind = msg.get("t")
@@ -179,6 +236,8 @@ class Desk:
                 self.ask = None
                 self.lamp()
                 self.dirty = True
+        elif kind == "radio":
+            self.radio(msg)
         elif kind == "ping":
             self.send(self.hello())
 
@@ -214,14 +273,20 @@ class Desk:
                     self.lamp()
                     self.dirty = True
             elif self.ask:
-                # a slow amber pulse: something is waiting on you
-                p = (time.ticks_ms() // 500) % 2
+                # yellow, on and off, for as long as it is waiting on you -
+                # red and green together is the only yellow this lamp has
+                p = (time.ticks_ms() // 450) % 2
                 if p != self.pulse:
                     self.pulse = p
-                    self.lamp(r=True, g=bool(p))
+                    self.lamp(r=bool(p), g=bool(p))
             if self.dirty:
                 self.draw()
             hit = self.t.get()
-            if hit and self.ask and not self.flash_until and hit[1] > 145:
-                self.rule(hit[0] > 160)
+            if hit and not self.flash_until:
+                if self.ask and hit[1] > 145:
+                    self.rule(hit[0] > 160)
+                elif not self.ask and hit[1] > 168:
+                    self.start_button(True)
+                    self.send({"t": "start"})
+                    self.flash_until = time.ticks_add(time.ticks_ms(), 500)
             time.sleep_ms(20)

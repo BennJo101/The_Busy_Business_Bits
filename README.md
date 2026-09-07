@@ -280,6 +280,7 @@ and works exactly as before when there is no board at all.
 | `desk/touch.py` | XPT2046 touch, deliberately coarse |
 | `desk/desk.py` | The two screens and the line protocol |
 | `desk/carrier.py` | The SD card: mounting it, and what it is carrying |
+| `desk/radio.py` | The board's WiFi and Bluetooth, and fetching over them |
 | `desk/main.py` | Runs it at boot |
 | `desk/flash_desk.py` | Puts it all on the board |
 | `desk/carry_bits.py` | Loads the project and the vault onto the card, and off again |
@@ -355,6 +356,56 @@ build on it:
   once at startup and kept.
 - That left the touch panel on the bus the card wanted, so touch is bit-banged
   now. It is read at 1MHz and never noticed.
+
+### START, and the board's own radios
+
+The idle screen has a **START** bar across the bottom. Pressing it brings the
+Wizard's console to the front — out of the taskbar if it was minimised, on top
+if it was buried. It is the way back in when the Bits are running but out of
+sight.
+
+On a computer they are *not* running on yet, `python bits_desk.py` waits for
+that same press and starts them — then hands the serial port over, because the
+app wants it for the gate and two things cannot hold one port. That is the whole
+cold-start story for a board carried to a strange machine: unload the project
+off the card, run the watcher, press START.
+
+The board has WiFi and Bluetooth of its own, and they are *not* the computer's.
+Seeing what is out there is the Investigator's job; putting the board onto a
+network is the Wizard's, the same as installing anything else:
+
+| Tool | Bit | |
+|---|---|---|
+| `wifi_scan` | Investigator | Networks the board can hear, with signal and security |
+| `bluetooth_scan` | Investigator | What is advertising itself nearby |
+| `board_network` | Wizard | Whether the board is on a network, and its address |
+| `board_join` | Wizard | Put it on one — **gated**, so it goes to the Boss |
+| `board_leave` | Wizard | Off again, radio down |
+
+`board_join` hitting the gate is the loop closing on itself: the board lights up
+asking permission to join a network, and you grant it by pressing a button on
+that same board.
+
+**The toggle.** *The Bits' web goes over the desk unit's WiFi* in settings sends
+everything the Investigator fetches out through the board's radio instead of
+this machine's connection. It does **not** quietly fall back — if the board is
+not on a network it says so and fetches nothing, because a silent fallback would
+be the one failure that matters when you turned it on to keep the traffic off
+this machine.
+
+What still goes over the computer's connection is the model API itself. That is
+deliberate: the link to the board moves 7KB/s and the board has 140KB of RAM, so
+routing a conversation through it would make every reply take minutes. The
+Investigator pulling a page down is the part worth moving.
+
+### The light
+
+| | |
+|---|---|
+| flashing **yellow** | something is waiting on you |
+| one **green** flash | approved |
+| one **red** flash | refused |
+| off | nothing needs you |
 
 ## Permissions and the gate
 

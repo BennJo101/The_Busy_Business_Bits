@@ -963,6 +963,8 @@ def _strip_html(html):
 def t_fetch(bit, url):
     if not url.lower().startswith(("http://", "https://")):
         url = "https://" + url
+    if USE_BOARD_NET:
+        return _fetch_over_board(url)
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (BusyBusinessBits/1.0 The Investigator)"})
     try:
@@ -979,6 +981,25 @@ def t_fetch(bit, url):
     if m:
         title = _strip_html(m.group(1))
     return "%s\n%s\n\n%s" % (url, title, text[:4000])
+
+
+def _fetch_over_board(url):
+    """The same fetch, but done by the board on its own network."""
+    got = _radio("get", timeout=60, url=url, limit=4000)
+    if not got.get("ok"):
+        return ("the Bits are set to use the desk unit's radio and %s. Either "
+                "put the board on a network, or turn that setting off to use "
+                "this computer's connection."
+                % got.get("error", "it wouldn't answer"))
+    page = got.get("out") or {}
+    if not page.get("ok"):
+        return "over the board: %s" % page.get("error", "it wouldn't fetch")
+    text = page.get("text") or ""
+    if "json" not in (page.get("type") or "") and "text/plain" not in (
+            page.get("type") or ""):
+        text = _strip_html(text)
+    return "%s  (over the board's radio, HTTP %s)\n\n%s" % (
+        page.get("url", url), page.get("status"), text[:4000])
 
 
 @tool("read_pdf", "Extract what text can be got out of a PDF. Scanned pages come back "
@@ -1797,6 +1818,122 @@ def t_open_floor(bit, question, who=""):
         return ON_FLOOR(names, str(question).strip())
     except Exception as e:                                        # noqa: BLE001
         return "the floor wouldn't open: %r" % e
+
+
+# ----------------------------------------------------------------------------
+# THE BOARD'S RADIOS
+#
+# The desk unit has its own WiFi and Bluetooth, which are not the computer's.
+# Seeing what is out there is the Investigator's job; wiring the board onto a
+# network is the Wizard's, the same way installing anything else is.
+#
+#   ON_RADIO(do, **args) -> {"ok": bool, "out": ..., "error": str}
+# ----------------------------------------------------------------------------
+ON_RADIO = None
+NO_RADIO = "there's no desk unit plugged in, so there's no radio to use."
+
+# When this is on, anything the Bits pull off the web goes out over the desk
+# unit's radio instead of the computer's. It does not quietly fall back: the
+# whole reason to turn it on is that the traffic should not be on this machine's
+# connection, and a silent fallback would be the one failure that matters.
+USE_BOARD_NET = False
+
+
+def _radio(do, **args):
+    if ON_RADIO is None:
+        return {"ok": False, "error": NO_RADIO}
+    try:
+        return ON_RADIO(do, **args)
+    except Exception as e:                                        # noqa: BLE001
+        return {"ok": False, "error": "the desk unit: %r" % e}
+
+
+def _bars(rssi):
+    """Signal as something readable out loud, not a negative number."""
+    try:
+        rssi = int(rssi)
+    except Exception:                                             # noqa: BLE001
+        return "?"
+    return ("strong" if rssi > -55 else "good" if rssi > -67 else
+            "weak" if rssi > -80 else "barely there")
+
+
+@tool("wifi_scan", "What wireless networks the desk unit can hear. This is the "
+      "board's own radio, not the computer's - it hears what is around the board.",
+      READ, "The Investigator", {}, [])
+def t_wifi_scan(bit):
+    got = _radio("scan")
+    if not got.get("ok"):
+        return got.get("error", "no answer from the desk unit")
+    nets = got.get("out") or []
+    if not nets:
+        return "the board hears nothing at all."
+    rows = ["%-22s %-10s ch%-3s %s" % (n["ssid"][:22], n["security"],
+                                       n["channel"], _bars(n["rssi"]))
+            for n in nets]
+    return "%d network(s) the board can hear:\n%s" % (len(nets), "\n".join(rows))
+
+
+@tool("bluetooth_scan", "What Bluetooth devices are advertising near the desk unit. "
+      "Takes a few seconds and hears only things that are announcing themselves.",
+      READ, "The Investigator",
+      {"seconds": _int("How long to listen. Default 4, max 10.")}, [])
+def t_bt_scan(bit, seconds=4):
+    seconds = max(1, min(10, int(seconds or 4)))
+    got = _radio("bt", timeout=seconds + 25, seconds=seconds)
+    if not got.get("ok"):
+        return got.get("error", "no answer from the desk unit")
+    seen = got.get("out") or []
+    if not seen:
+        return "nothing nearby is advertising itself."
+    rows = ["%-24s %s  %s" % (d.get("name") or "(no name)", d["address"],
+                              _bars(d["rssi"])) for d in seen]
+    return "%d Bluetooth device(s) near the board:\n%s" % (len(seen),
+                                                           "\n".join(rows))
+
+
+@tool("board_network", "Whether the desk unit is on a wireless network of its own, "
+      "and what address it has. Check here before promising the Bits can reach "
+      "anything through the board.",
+      READ, "The Wizard", {}, [])
+def t_board_net(bit):
+    got = _radio("status")
+    if not got.get("ok"):
+        return got.get("error", "no answer from the desk unit")
+    st = got.get("out") or {}
+    if not st.get("on"):
+        return "the board's radio is off."
+    if not st.get("connected"):
+        return "the board's radio is on but not joined to anything."
+    return ("the board is on %s as %s (gateway %s, %s signal)."
+            % (st.get("ssid") or "a network", st.get("ip"), st.get("gateway"),
+               _bars(st.get("rssi"))))
+
+
+@tool("board_join", "Put the desk unit onto a wireless network, so the Bits can reach "
+      "the web over the board's radio instead of the computer's. Ask for the password "
+      "rather than guessing it.",
+      EXECUTE, "The Wizard",
+      {"ssid": _str("The network name, exactly as wifi_scan gave it."),
+       "password": _str("Its password. Leave blank for an open network.")},
+      ["ssid"])
+def t_board_join(bit, ssid, password=""):
+    got = _radio("connect", timeout=45, ssid=ssid, password=password)
+    if not got.get("ok"):
+        return got.get("error", "no answer from the desk unit")
+    st = got.get("out") or {}
+    if not st.get("connected"):
+        return "it wouldn't join %s. %s" % (ssid, st.get("error", ""))
+    return "the board is on %s as %s." % (ssid, st.get("ip"))
+
+
+@tool("board_leave", "Take the desk unit off its network and turn its radio off.",
+      WRITE, "The Wizard", {}, [])
+def t_board_leave(bit):
+    got = _radio("forget")
+    if not got.get("ok"):
+        return got.get("error", "no answer from the desk unit")
+    return "the board's radio is off."
 
 
 ROUTINES = {
