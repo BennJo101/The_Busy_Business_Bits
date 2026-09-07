@@ -637,6 +637,16 @@ def t_pending(bit):
       "has actually said yes - you are the last thing between a Bit and the disk.",
       EXECUTE, "The Boss", {"id": _str("The approval id, e.g. A3.")}, ["id"])
 def t_approve(bit, id):
+    # The Boss rules on the gate when he is in the room; when he is not, it
+    # goes to the desk unit's screen for a hand. Without this the Boss could
+    # clear a gate he was not present for - a Bit asks, he agrees, and the work
+    # runs with nobody having looked at it. Measured once at 178 files moved
+    # eleven seconds after they were queued.
+    here = present_bits()
+    if here is not None and "The Boss" not in here:
+        return ("the Boss isn't in the room. This one goes to the desk unit's "
+                "screen for a hand - say so and stop, or ask the Wizard to "
+                "summon him.")
     a, it = _find_approval(id)
     if not it:
         return "no approval called %s" % id

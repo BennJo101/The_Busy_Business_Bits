@@ -61,6 +61,9 @@ the numbers.
   That is the Courier's verb rather than the Boss's, but it is the Boss's box.
 - **The light** — flashing yellow while something waits on you, one green flash
   when you approve it, one red when you don't.
+- **Where a ruling happens** — with the Boss in the room, he rules and the Bits
+  look to him for it. With him not summoned, it goes to the desk unit's screen
+  and waits for a hand. He cannot rule on what he was not present for.
 
 ## The Coder — *build*
 

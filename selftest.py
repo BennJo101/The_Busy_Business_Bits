@@ -105,6 +105,25 @@ def test_gate():
           "tools" in tools.run_tool("The Wizard", "bit_status", {}).lower()
           or "scope" in tools.run_tool("The Wizard", "bit_status", {}).lower())
 
+    # The Boss rules when he is in the room, and the desk unit's screen is what
+    # happens when he is not. Without this he could clear a gate he was never
+    # present for: a Bit asks, he agrees, and the work runs unseen.
+    tools.STAGE_PRESENT = lambda: ["The Coder"]
+    try:
+        out = tools.run_tool("The Boss", "approve", {"id": "A1"})
+        check("the Boss can't rule from outside the room", "isn't in the room" in out,
+              out[:70])
+        check("and it is sent to the desk unit instead", "desk unit" in out)
+        tools.STAGE_PRESENT = lambda: ["The Boss", "The Coder"]
+        out = tools.run_tool("The Boss", "approve", {"id": "A1"})
+        check("in the room, he rules as before", "isn't in the room" not in out,
+              out[:70])
+    finally:
+        tools.STAGE_PRESENT = None
+    check("with no screen wired at all it still works",
+          "isn't in the room" not in tools.run_tool("The Boss", "approve",
+                                                    {"id": "A1"}))
+
     # the gate has to reach the screen: a ruling can't happen off screen, so
     # hitting it fetches the Boss and tells the queuing Bit he is coming
     raised = []

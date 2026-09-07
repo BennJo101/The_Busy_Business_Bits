@@ -1364,12 +1364,16 @@ class App:
         who = SHORT.get(item.get("bit", ""), item.get("bit", ""))
         line = "%s needs the Boss - %s" % (who, item.get("summary", ""))
         self.root.after(0, lambda: self.console.room_sys(line))
-        if self.desk and self.desk.here():
-            self.desk.ask(item)          # it lights up on the desk immediately
-            return ("It is on the Boss's desk unit - the little screen is "
-                    "lit and waiting for a hand. Say so and stop.")
+        # The Boss first, if he is in the room: he is the gate, and a ruling
+        # from him is the quick path. The desk unit is what happens when he
+        # isn't here - not a replacement for him.
         if BOSS in self.windows or BOSS in self._pending:
             return "The Boss is here - put it to him by name and he can rule on it."
+        if self.desk and self.desk.here():
+            self.desk.ask(item)          # it lights up on the desk immediately
+            return ("The Boss isn't in the room, so it is on his desk unit - "
+                    "the little screen is lit and waiting for a hand. Say so "
+                    "and stop.")
         why = self._why_not_summon(BOSS)
         if why:
             return why

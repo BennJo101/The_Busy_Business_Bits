@@ -262,6 +262,13 @@ The on-board LED pulses amber while something is waiting, goes green or red as
 you rule, and the rest of the time the screen shows the room — who is summoned,
 in their colours, and the last thing anyone said.
 
+**Who clears the gate.** If the Boss is in the room, he does: the Bits look to
+him and he rules directly, which is the quick path. If he is *not* summoned it
+goes to the desk unit's screen and waits for a hand. He cannot rule on something
+he was not present for — without that rule he could clear a gate nobody had
+looked at, which is not a theory: a Bit asked, the Boss agreed eleven seconds
+later, and 178 files moved before anyone saw the screen light up.
+
 A button goes straight through the Boss's own `approve` and `refuse` - the two
 tools that run directly because he *is* the gate. The desk stands in for his
 ruling rather than routing around it, so an approval granted there runs the
