@@ -538,28 +538,36 @@ What arrives is a complete, relocatable CPython with Tkinter, Pillow,
 pyserial, and SpeechRecognition — everything the Bits need, including the wake
 word. It does not touch any Python already on the machine.
 
-#### Taking files off the card over WiFi
+#### Moving files over WiFi instead of the wire
 
-The other direction has a fast path too. `desk/net_carry.py` puts the board on
-a network, starts a small file server on it, and pulls the card's contents over
-TCP instead of the serial line:
+`desk/net_carry.py` puts the board on a network, starts a small file server on
+it, and moves files over TCP rather than down the serial line - in both
+directions:
 
 ```
+python desk/net_carry.py --ssid NAME --password SECRET --payload bits.zip
 python desk/net_carry.py --ssid NAME --password SECRET --unload DIR
 python desk/net_carry.py --ssid NAME --password SECRET --speed
 ```
 
 The password joins the board to the network and is never written down.
 
-The server, its framing and its path guard are tested — `desk/board_check.py`
-runs both ends on the board over loopback, so a listing, a file read checked
-against the copy here, and two attempts to read outside the card are covered.
-That test needs the board, which is why it lives there and not in `selftest`.
-The
-radio hop itself is not: it needs a real network's credentials, so it has never
-been run end to end. **Serial is the proven path in this direction.** The
-board's radio is not in doubt — the handover above uses it — but treat this
-particular script as untried until you have run it once yourself.
+For a long time the server only read. That made the fast path one-directional:
+pulling the card's contents off took seconds over the radio, while putting a
+35MB bundle back on took seventy-five minutes down the wire - the direction
+used most often, on the slowest link available. It writes now, and answers a
+`PUT` with the sha256 of what actually landed, so the sender can check the
+copy without reading all of it back again.
+
+The protocol is covered by `desk/board_check.py`, which runs both ends against
+each other on the board over loopback: a listing, a file read checked against
+the copy here, a file written and hashed, and attempts to read and to write
+outside the card, all refused. That test needs the board, which is why it is
+there and not in `selftest`.
+
+The serial path below still works and needs no network at all, which is the
+case for a board carried somewhere strange. It is also resumable, so it is the
+one to fall back to.
 
 Putting the bundle on the card in the first place is the slow half, and it is
 done from a machine that already has the project:

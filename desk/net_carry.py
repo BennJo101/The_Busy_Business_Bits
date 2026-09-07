@@ -79,6 +79,33 @@ class Net:
         self.s.sendall(("GET %s\n" % path).encode())
         return self._reply()
 
+    def size(self, path):
+        self.s.sendall(("SIZE %s\n" % path).encode())
+        try:
+            return int(self._reply() or b"0")
+        except ValueError:
+            return 0
+
+    def put(self, path, local, on_progress=None):
+        """Send a file to the card. Returns the sha256 the board saw.
+
+        The board hashes as it writes, so what comes back is what actually
+        landed on the card rather than what we believe we sent.
+        """
+        size = os.path.getsize(local)
+        self.s.sendall(("PUT %s %d\n" % (path, size)).encode())
+        sent = 0
+        with open(local, "rb") as f:
+            while True:
+                block = f.read(65536)
+                if not block:
+                    break
+                self.s.sendall(block)
+                sent += len(block)
+                if on_progress:
+                    on_progress(sent, size)
+        return self._reply().decode("utf-8", "replace")
+
     def close(self):
         try:
             self.s.sendall(b"BYE\n")
@@ -92,6 +119,8 @@ def main():
     ap.add_argument("--ssid", required=True)
     ap.add_argument("--password", default="")
     ap.add_argument("--unload", metavar="DIR")
+    ap.add_argument("--payload", metavar="ZIP",
+                    help="send the handover bundle to the card over WiFi")
     ap.add_argument("--what", default="app", choices=sorted(ROOTS))
     ap.add_argument("--speed", action="store_true",
                     help="just measure how fast it goes")
@@ -111,6 +140,31 @@ def main():
     root = ROOTS[args.what]
     n = Net(ip)
     try:
+        if args.payload:
+            if not os.path.isfile(args.payload):
+                sys.exit("no such file: %s" % args.payload)
+            size = os.path.getsize(args.payload)
+            here = c.local_sha(args.payload)
+            print("sending %.1f MB over WiFi" % (size / 1048576.0))
+            t0 = time.time()
+
+            def tick(sent, total):
+                dt = max(time.time() - t0, 0.001)
+                sys.stdout.write("\r  %s %6.0f KB/s"
+                                 % (c.bar(sent, total), sent / 1024.0 / dt))
+                sys.stdout.flush()
+
+            there = n.put(c.PAYLOAD, args.payload, tick)
+            dt = time.time() - t0
+            print("\r  %s  %.0fs, %.0f KB/s%s"
+                  % (c.bar(size, size), dt, size / 1024.0 / max(dt, 0.1),
+                     " " * 16))
+            if there != here:
+                sys.exit("what landed does not match:\n  here %s\n  card %s"
+                         % (here, there))
+            print("sha256 matches: %s" % here)
+            print("the wire would have taken %.0f minutes." % (size / 7800.0 / 60))
+            return
         files = n.list(root)
         total = sum(s for _, s in files)
         print("%d files, %.1f MB on the card" % (len(files), total / 1048576.0))

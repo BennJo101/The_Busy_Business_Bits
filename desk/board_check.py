@@ -57,8 +57,24 @@ print('outside=' + str(len(reply(s)) == 0))
 s.send(('GET /sd/BusyBusinessBits/../../secret' + NL).encode())
 print('dotdot=' + str(len(reply(s)) == 0))
 
+body = bytes(range(256)) * 8
+s.send(('PUT /sd/BusyBusinessBits/bits-check.tmp ' + str(len(body)) + NL).encode())
+s.send(body)
+got = reply(s).decode()
+print('putsha=' + got)
+print('putwant=' + ubinascii.hexlify(uhashlib.sha256(body).digest()).decode())
+
+s.send(('PUT /main.py 4' + NL).encode())
+s.send(b'oops')
+print('putescape=' + str(len(reply(s)) == 0))
+
 s.send(('BYE' + NL).encode())
 s.close()
+try:
+    import os as _os
+    _os.remove('/sd/BusyBusinessBits/bits-check.tmp')
+except Exception:
+    pass
 """
 
 
@@ -134,6 +150,11 @@ try:
           got.get("outside") == "True")
     check("and refuses to be walked out of it with ..",
           got.get("dotdot") == "True")
+    check("a file written over TCP lands intact",
+          got.get("putsha") and got.get("putsha") == got.get("putwant"),
+          got.get("putsha", "")[:16])
+    check("it refuses to write outside the card either",
+          got.get("putescape") == "True")
 finally:
     if b:
         b.restart(); b.close()
