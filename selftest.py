@@ -507,11 +507,48 @@ def test_radios():
           d.radio("scan", timeout=1).get("ok") is False)
 
 
+def test_undo_filing():
+    """Filing writes down what it moved, so it can be put back."""
+    print("undoing a filing run")
+    import os
+    import shutil
+    import tempfile
+
+    check("undo belongs to the Bit that did the moving",
+          tools.TOOLS["undo_filing"].owner == "The Courier")
+    check("and putting things back needs nobody's approval",
+          tools.TOOLS["undo_filing"].tier not in tools.GATED)
+
+    sand = tempfile.mkdtemp()
+    keep = tools._load(tools.FILINGS_PATH, {"runs": []})
+    try:
+        for name in ("photo.jpg", "notes.pdf", "sheet.xlsx"):
+            with open(os.path.join(sand, name), "w") as f:
+                f.write("x")
+        tools.run_tool("The Courier", "file_by_rule",
+                       {"path": sand, "_approved": True})
+        left = sorted(f for f in os.listdir(sand)
+                      if os.path.isfile(os.path.join(sand, f)))
+        check("filing moves them out", left == [], left)
+        out = tools.run_tool("The Courier", "undo_filing", {})
+        back = sorted(f for f in os.listdir(sand)
+                      if os.path.isfile(os.path.join(sand, f)))
+        check("and undo brings every one back",
+              back == ["notes.pdf", "photo.jpg", "sheet.xlsx"], back)
+        check("it says how many", "put 3 file(s) back" in out, out[:60])
+        again = tools.run_tool("The Courier", "undo_filing", {})
+        check("undoing twice moves nothing further",
+              "put 0 file(s) back" in again, again[:60])
+    finally:
+        shutil.rmtree(sand, ignore_errors=True)
+        tools._save(tools.FILINGS_PATH, keep)   # leave the real log alone
+
+
 def main():
     for t in (test_room_rules, test_ask_bit, test_ownership, test_gate,
               test_summoning, test_sprites, test_routing, test_the_floor,
               test_layout, test_wake, test_desk, test_vault, test_radios,
-              test_party):
+              test_undo_filing, test_party):
         t()
     print()
     if FAILED:

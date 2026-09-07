@@ -106,6 +106,7 @@ GHOST_PATH = os.path.join(STATE_DIR, "ghosts.json")
 APPROVALS_PATH = os.path.join(STATE_DIR, "approvals.json")
 METRICS_PATH = os.path.join(STATE_DIR, "metrics.json")
 SEEN_PATH = os.path.join(STATE_DIR, "seen.json")
+FILINGS_PATH = os.path.join(STATE_DIR, "filings.json")
 SCOPES_PATH = os.path.join(STATE_DIR, "scopes.json")
 
 MAX_RESULT = 3000          # tool output ceiling; longer goes to a report file
@@ -878,6 +879,12 @@ def t_file_by_rule(bit, path="", into=""):
     p = _resolve(bit, path or DOWNLOADS)
     base = _resolve(bit, into) if into else p
     moved, skipped = [], 0
+    # Every move is written down, in full, before anything is said about it.
+    # The spoken answer is clipped and the approval record keeps only 400
+    # characters of it - so without this there is no complete account of what
+    # went where, and a filing run that shouldn't have happened cannot be
+    # undone. That is not hypothetical: it has happened once.
+    trail = []
     for e in list(os.scandir(p)):
         if e.is_dir() or e.name.startswith("."):
             continue
@@ -895,10 +902,51 @@ def t_file_by_rule(bit, path="", into=""):
                     stem, datetime.now().strftime("%Y%m%d"), ext))
             shutil.move(e.path, target)
             moved.append("%s -> %s" % (e.name, dest))
+            trail.append([e.path, target])
         except Exception:
             skipped += 1
-    return "moved %d, left %d where they were.\n%s" % (
-        len(moved), skipped, "\n".join(moved[:40]))
+    if trail:
+        runs = _load(FILINGS_PATH, {"runs": []})
+        runs["runs"].append({"when": _now(), "from": p, "into": base,
+                             "moves": trail})
+        del runs["runs"][:-20]              # the last twenty runs is plenty
+        _save(FILINGS_PATH, runs)
+    return "moved %d, left %d where they were.%s\n%s" % (
+        len(moved), skipped,
+        "  Say undo_filing to put them back." if trail else "",
+        "\n".join(moved[:40]))
+
+
+@tool("undo_filing", "Put back what a filing run moved. Use it the moment something "
+      "was filed that shouldn't have been - it only ever returns a file to where it "
+      "came from, which is the safe direction, so it needs no one's approval.",
+      WRITE, "The Courier",
+      {"which": _int("How many runs back. 1 is the last one, the default.")}, [])
+def t_undo_filing(bit, which=1):
+    runs = _load(FILINGS_PATH, {"runs": []}).get("runs") or []
+    if not runs:
+        return "nothing has been filed by rule on this machine yet."
+    i = len(runs) - max(1, int(which or 1))
+    if i < 0:
+        return "only %d filing run(s) are on record." % len(runs)
+    run = runs[i]
+    back, missing = 0, 0
+    for src, dst in run.get("moves", []):
+        if not os.path.isfile(dst) or os.path.exists(src):
+            missing += 1               # gone, or something is in its place now
+            continue
+        try:
+            os.makedirs(os.path.dirname(src), exist_ok=True)
+            shutil.move(dst, src)
+            back += 1
+        except Exception:              # noqa: BLE001
+            missing += 1
+    run["undone"] = _now()
+    _save(FILINGS_PATH, {"runs": runs})
+    return ("put %d file(s) back where they were, from the run at %s.%s"
+            % (back, run.get("when", "?"),
+               ("  %d could not be moved - already gone, or something is there "
+                "now." % missing) if missing else ""))
 
 
 @tool("deliver_file", "Send a file somewhere: another folder, another drive, or a "

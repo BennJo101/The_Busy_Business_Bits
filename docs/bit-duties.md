@@ -93,6 +93,12 @@ Every crossing of a boundary — folder to folder, machine to machine, you to so
 - **Sync** — he carries Bit state, notes and settings between your devices. When you place
   a Bit on a new machine, Courier is what makes it the *same* Bit.
 
+- **Putting it back** — every filing run is written down in full before anything
+  is said about it, so `undo_filing` returns the files to where they came from.
+  The spoken answer is clipped and the approval record keeps 400 characters, so
+  without the trail there is no complete account of a run — which is how 178
+  files ended up only partly recoverable once.
+
 ## The Investigator — *dig*
 
 Points **outward**. Anything he tells you came from outside your machine. (Inside is the
