@@ -654,7 +654,10 @@ class Ears:
     without a trace: it is never put in the room log, never shown, never sent.
     """
 
-    ARMED_FOR = 12.0        # seconds a bare "Bits" waits for the actual line
+    # Seconds a bare "Bits" waits for the actual line. Long, on purpose: the
+    # cost of waiting too long is nothing at all, and the cost of being too
+    # short is saying the word again and wondering whether it heard.
+    ARMED_FOR = 20.0
     PHRASE_MAX = 14         # seconds of one utterance before it is cut off
 
     def __init__(self, app):
@@ -764,8 +767,12 @@ class Ears:
             self._armed_until = 0.0
             self.send(rest)
         else:
+            # Say it back. The word is heard through a recogniser that returns
+            # "its" and "boots" as often as "bits", so the useful thing to
+            # confirm is not that something was heard but that it was taken as
+            # the name.
             self._armed_until = now + self.ARMED_FOR
-            self.say("...listening.")
+            self.say("heard \"%s\" - listening, go ahead." % text.strip())
 
     # -- back to the main thread --------------------------------------------
     def send(self, text):

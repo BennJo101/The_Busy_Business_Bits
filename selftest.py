@@ -376,6 +376,37 @@ def test_wake():
           == (True, "boss - what's the number?"),
           W("oi, boss - what's the number?", word="oi"))
 
+    # The real problem was never the rule, it was the list behind it. One
+    # short plosive syllable comes back from the recogniser as almost
+    # anything, and every spelling nobody had thought of was a wake word that
+    # did not work - which reads as a microphone that is ignoring you.
+    misheard = ["its", "bets", "bins", "pits", "fits", "bitts", "bitzz",
+                "boots", "bix", "bit", "bitz", "bids", "beats", "biz"]
+    deaf = [m for m in misheard if not W(m)[0]]
+    check("what the recogniser actually returns still wakes it", not deaf, deaf)
+
+    check("and it carries the line with it",
+          W("its open the vault") == (True, "open the vault"),
+          W("its open the vault"))
+    check("a short phrase can put the word anywhere in it",
+          W("okay so bits") == (True, "") and W("right then bits") == (True, ""))
+    check("a long one cannot",
+          W("i need a bit of help with the spreadsheet later") == (False, ""))
+
+    quiet = ["it", "big", "beds", "bat", "this", "that", "hello there",
+             "rabbits are fine", "the big red button on the left"]
+    loud = [q for q in quiet if W(q)[0]]
+    check("ordinary talking still goes unheard", not loud, loud)
+
+    # "bitsy" is the same length and shape as "bitts" and "bitzz", which do
+    # have to wake it, so it wakes it too. That is the trade being made on
+    # purpose: a rare word occasionally waking the room costs a shrug, and a
+    # wake word that ignores you costs the feature.
+    check("a longer word that merely contains it is a different word",
+          not core.sounds_like("rabbits") and not core.sounds_like("bitmaps"))
+    check("an exact short wake word is allowed to be short",
+          core.sounds_like("oi", word="oi") and not core.sounds_like("it"))
+
 
 def test_desk():
     """The desk unit's PC side, with no board plugged in."""

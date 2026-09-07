@@ -3,6 +3,7 @@ The Busy Business Bits - core (no GUI)
 Roster, sprite discovery, voice synthesis, API client, room routing.
 """
 
+import difflib
 import io
 import json
 import math
@@ -1030,15 +1031,54 @@ WAKE_WORD = "bits"
 # What the recogniser actually hands back when someone says "Bits". It is a
 # short plosive word and Google has opinions about it; a wake word nobody can
 # trigger is worse than one that occasionally mishears.
-WAKE_ALIKE = ("bit", "bitz", "bids", "beats", "biz", "busy business bits")
+WAKE_ALIKE = ("bit", "bitz", "bids", "beats", "biz", "bix", "bics", "blitz",
+               "busy business bits")
 
 # "hey bits", "ok bits", "the bits" - all the same thing
-WAKE_FILLER = ("hey", "ok", "okay", "yo", "hi", "hello", "um", "uh", "so", "the")
+WAKE_FILLER = ("hey", "ok", "okay", "yo", "hi", "hello", "um", "uh", "so",
+               "the", "listen", "computer", "excuse", "me", "please", "right")
+
+# How close a word has to sound before it is taken as the wake word. A list of
+# spellings was never going to be enough: the recogniser returns whatever it
+# likes for one short plosive syllable - its, bets, pits, fits, bins, boots -
+# and every one of those was a wake word that did not work. Matching on the
+# shape of the word catches them without anyone having to guess the list.
+WAKE_NEAR = 0.6
+
+# Below this many words, the wake word is allowed anywhere in the phrase
+# rather than only at the front. "okay so bits" and "right then, bits" are
+# people talking to the room; a long sentence with "bits" in the middle of it
+# is people talking about something else.
+WAKE_SHORT = 4
 
 # "Bit of a mess in Downloads" is not someone talking to the Bits. Only needed
 # because "bit" has to be allowed: the plural is what gets dropped most often.
 WAKE_NOT_BEFORE = ("of", "more", "less", "later", "off", "by", "much",
                    "early", "me")
+
+
+def _bare(w):
+    return re.sub(r"[^a-z]", "", (w or "").lower())
+
+
+def sounds_like(token, word=WAKE_WORD, alike=WAKE_ALIKE, near=WAKE_NEAR):
+    """Near enough to the wake word that it was probably meant as it.
+
+    Short words are the hard ones: two letters is not enough to be sure of
+    anything, so "it" is not a wake word however close it looks.
+    """
+    t, w = _bare(token), _bare(word)
+    if not t or not w:
+        return False
+    if t == w or t in {_bare(a) for a in alike}:
+        return True                     # said exactly, however short it is
+    # Only guesses are held to a length. Two letters is not enough to be sure
+    # of anything, so "it" is never the wake word; and a longer word that
+    # merely contains it is a different word, or "rabbits" would answer to
+    # "bits".
+    if len(t) < 3 or len(t) > len(w) + 2:
+        return False
+    return difflib.SequenceMatcher(None, t, w).ratio() >= near
 
 
 def wake_split(text, word=WAKE_WORD, alike=WAKE_ALIKE):
@@ -1053,19 +1093,43 @@ def wake_split(text, word=WAKE_WORD, alike=WAKE_ALIKE):
     can be argued with in a test rather than by talking at a microphone.
     """
     said = (text or "").strip()
-    names = sorted({word.lower()} | {a.lower() for a in alike},
-                   key=lambda n: -len(n))
-    pat = r"^\W*(?:(?:%s)\W+)*(%s)\b[\s,.!?:;-]*" % (
-        "|".join(re.escape(f) for f in WAKE_FILLER),
-        "|".join(re.escape(n) for n in names))
-    m = re.match(pat, said, re.I)
-    if not m:
+    words = said.split()
+    if not words:
         return False, ""
-    rest = said[m.end():].strip()
-    if (m.group(1).lower() != word.lower()
-            and rest.split()[:1] and rest.split()[0].lower() in WAKE_NOT_BEFORE):
-        return False, ""            # a near-miss carrying on as ordinary English
-    return True, rest
+
+    # the whole name, said in full
+    for phrase in (a for a in alike if " " in a):
+        if said.lower().startswith(phrase.lower()):
+            return True, said[len(phrase):].lstrip(" ,.!?:;-").strip()
+
+    def after(i):
+        # Leading punctuation is the comma after the name; trailing belongs to
+        # what was said and is left alone - "is the repo clean?" is a question.
+        rest = " ".join(words[i + 1:]).lstrip(" ,.!?:;-").strip()
+        # "bit of a mess in Downloads" is somebody talking, not somebody
+        # talking to us. Only a near-miss is held to this: a clean "bits"
+        # is taken at its word whatever follows it.
+        if _bare(words[i]) != _bare(word):
+            first = rest.split()[:1]
+            if first and _bare(first[0]) in WAKE_NOT_BEFORE:
+                return None
+        return rest
+
+    i = 0
+    while i < len(words) and _bare(words[i]) in WAKE_FILLER:
+        i += 1
+    if i < len(words) and sounds_like(words[i], word, alike):
+        rest = after(i)
+        return (False, "") if rest is None else (True, rest)
+
+    # A short phrase is somebody getting the room's attention, so the word is
+    # allowed anywhere in it. A long one is somebody discussing bits of things.
+    if len(words) <= WAKE_SHORT:
+        for j, token in enumerate(words):
+            if sounds_like(token, word, alike):
+                rest = after(j)
+                return (False, "") if rest is None else (True, rest)
+    return False, ""
 
 
 PASS = "..."
