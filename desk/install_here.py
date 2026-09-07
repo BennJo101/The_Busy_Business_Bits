@@ -44,10 +44,15 @@ LAUNCHER = "Busy Business Bits.bat"
 # Raw, and joined with os.path.join below: written as a plain string, the
 # "\b" of "\bits_desk.py" is a backspace, and the launcher it wrote pointed at
 # "Appits_desk.py".
+# No BITS_HOME here on purpose. Keeping settings on the card is right when
+# the Bits are *running from* it - the key arrives and leaves with the card.
+# An install is the opposite: it commits to this machine, so it should use the
+# machine's own settings and share them with anything already here. Setting it
+# started a second, empty settings file beside a perfectly good one, and the
+# Bits came up asking for an API key that was already on disk.
 BOOT = r"""@echo off
 rem Written by the installer. Delete this file to stop the Bits starting with
 rem Windows, or run "Uninstall from this computer".
-set "BITS_HOME={state}"
 set "BITS_VAULT={vault}"
 start "" "{pythonw}" "{watcher}"
 """
@@ -106,6 +111,9 @@ def main():
     if args.remove:
         return remove()
 
+    if os.path.normcase(os.path.abspath(CARD)) == os.path.normcase(TARGET):
+        sys.exit("this is already the installed copy - run the installer from "
+                 "the card, not from %s" % TARGET)
     print("installing the Busy Business Bits")
     print("   from %s" % CARD)
     print("   to   %s" % TARGET)
@@ -132,19 +140,18 @@ def main():
     boot = os.path.join(STARTUP, LAUNCHER)
     with open(boot, "w", encoding="utf-8", newline="\r\n") as f:
         f.write(BOOT.format(
-            state=os.path.join(TARGET, "State"),
             vault=os.path.join(TARGET, "Vault"),
             pythonw=os.path.join(TARGET, "Python", "pythonw.exe"),
             watcher=os.path.join(TARGET, "App", "bits_desk.py")))
     print("   registered at login: %s" % boot)
 
     if not args.no_start:
+        env = dict(os.environ)
+        env.pop("BITS_HOME", None)         # this machine's own settings
+        env["BITS_VAULT"] = os.path.join(TARGET, "Vault")
         subprocess.Popen([os.path.join(TARGET, "Python", "pythonw.exe"),
                           os.path.join(TARGET, "App", "bits_desk.py")],
-                         cwd=os.path.join(TARGET, "App"),
-                         env=dict(os.environ,
-                                  BITS_HOME=os.path.join(TARGET, "State"),
-                                  BITS_VAULT=os.path.join(TARGET, "Vault")))
+                         cwd=os.path.join(TARGET, "App"), env=env)
         print("   the watcher is running now")
     print()
     print("done. Plug the desk unit in and press START - the Bits will come up.")

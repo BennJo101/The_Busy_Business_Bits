@@ -20,6 +20,7 @@ import time
 from machine import Pin
 
 import carrier
+from portal import AP_NAME as P_NAME, AP_PASS as P_PASS
 import tft as T
 import touch as TC
 
@@ -79,6 +80,7 @@ class Desk:
             except Exception:
                 self.carrying = 0
         self.ask = None                 # the approval on screen, if any
+        self.ap = ""                    # the address, while handing over
         self.room = {"in": [], "who": "", "say": ""}
         self.dirty = True
         self.flash_until = 0
@@ -95,7 +97,9 @@ class Desk:
 
     def draw(self):
         self.dirty = False
-        if self.ask:
+        if self.ap:
+            self.draw_portal()
+        elif self.ask:
             self.draw_ask()
         else:
             self.draw_idle()
@@ -124,8 +128,15 @@ class Desk:
         for line in wrap(say, 38)[:5]:
             d.text(line, 8, y, self.PAPER, self.INK)
             y += 14
-        d.text("carrying the Bits - %d files" % self.carrying if self.carrying
-               else "nothing needs you", 8, 154, self.DIM, self.INK)
+        # A tappable strip of its own. The portal has to be reachable from
+        # the board alone: the computer it is being handed to has no software
+        # to ask for it with, which is the entire problem being solved.
+        d.fill(0, 146, T.W, 26, d.rgb(42, 30, 36))
+        d.text("hand over to a new computer", 8, 152, self.GOLD,
+               d.rgb(42, 30, 36))
+        d.text("carrying %d files" % self.carrying if self.carrying
+               else "nothing needs you", T.W - 8 * 17 - 8, 152, self.DIM,
+               d.rgb(42, 30, 36))
         self.start_button()
 
     def start_button(self, hit=False):
@@ -181,6 +192,43 @@ class Desk:
 
     def send(self, obj):
         print(json.dumps(obj))
+
+    def portal(self, on=True):
+        """Become an access point, so a bare computer can be handed the Bits.
+
+        The screen carries the instructions, because at this point the computer
+        has no way to be told anything: it has a COM port it cannot use and no
+        software to use it with. What it does have is wifi and a browser.
+        """
+        import portal as P
+        if not on:
+            P.stop_ap()
+            self.ap = ""
+            self.dirty = True
+            return
+        try:
+            self.busy("starting the access point...")
+            self.ap = P.start_ap()
+            import _thread
+            _thread.start_new_thread(P.serve, ())
+        except Exception as e:
+            self.ap = ""
+            self.busy("no access point: %r" % e)
+            return
+        self.dirty = True
+
+    def draw_portal(self):
+        """What to type into a machine that has nothing on it."""
+        d = self.d
+        d.clear(self.INK)
+        self.header("HANDING OVER THE BITS", self.DARK, self.GOLD)
+        d.text("join this wifi:", 8, 40, self.DIM, self.INK)
+        d.text(P_NAME, 8, 58, self.GOLD, self.INK, 2)
+        d.text("password:  " + P_PASS, 8, 88, self.PAPER, self.INK)
+        d.text("then open a browser at:", 8, 118, self.DIM, self.INK)
+        d.text("http://" + self.ap, 8, 138, self.GOLD, self.INK, 2)
+        d.fill(0, 174, T.W, 66, self.DARK)
+        d.text("tap to stop", (T.W - 8 * 11) // 2, 200, self.GOLD, self.DARK)
 
     def radio(self, msg):
         """Anything that needs the board's own WiFi or Bluetooth.
@@ -239,6 +287,8 @@ class Desk:
                 self.dirty = True
         elif kind == "radio":
             self.radio(msg)
+        elif kind == "portal":
+            self.portal(bool(msg.get("on", True)))
         elif kind == "state":
             # what it thinks it is showing. Worth having: the difference
             # between "the touch panel is wrong" and "the screen is not the
@@ -300,9 +350,13 @@ class Desk:
             if self.dirty:
                 self.draw()
             if hit and not self.flash_until:
-                if self.ask and hit[1] > 145:
+                if self.ap and hit[1] > 168:
+                    self.portal(False)          # tap to stop handing over
+                elif not self.ask and 138 < hit[1] <= 172:
+                    self.portal(True)           # the strip above START
+                elif self.ask and hit[1] > 145:
                     self.rule(hit[0] > 160)
-                elif not self.ask and hit[1] > 60:
+                elif not self.ask and hit[1] > 172:
                     # anything below the header. There is nothing else to press
                     # on this screen, and a resistive panel read through a
                     # rough calibration lands lower than the bar is drawn.
