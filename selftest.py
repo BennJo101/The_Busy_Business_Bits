@@ -544,6 +544,45 @@ def test_undo_filing():
         tools._save(tools.FILINGS_PATH, keep)   # leave the real log alone
 
 
+def test_install_over_itself():
+    print("installing over a running copy")
+    import shutil
+    import tempfile
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "desk"))
+    import install_here as ih
+
+    sand = tempfile.mkdtemp()
+    try:
+        src = os.path.join(sand, "from")
+        dst = os.path.join(sand, "to")
+        os.makedirs(src)
+        os.makedirs(dst)
+        for name in ("a.txt", "b.dll"):
+            open(os.path.join(src, name), "w").write(name)
+        # a leftover from a previous update, of the kind Windows forces when
+        # a file is loaded and cannot be overwritten
+        open(os.path.join(dst, "b.dll.old"), "w").write("stale")
+
+        n = ih.copy(src, dst, "test")
+        check("it copies what it should", n == 2, n)
+        check("and does not copy a leftover across",
+              not os.path.exists(os.path.join(dst, "b.dll.old.old")))
+
+        gone = ih.sweep_old(dst)
+        check("leftovers are swept", gone == 1, gone)
+        check("and the real files stay",
+              sorted(os.listdir(dst)) == ["a.txt", "b.dll"], os.listdir(dst))
+
+        # place() must survive a target that already exists
+        open(os.path.join(dst, "a.txt"), "w").write("old")
+        ih.place(os.path.join(src, "a.txt"), os.path.join(dst, "a.txt"))
+        check("an existing file is replaced",
+              open(os.path.join(dst, "a.txt")).read() == "a.txt")
+    finally:
+        shutil.rmtree(sand, ignore_errors=True)
+
+
 def test_approvals_bounded():
     print("the approval log stays a sensible size")
     keep = tools._approvals()
@@ -667,6 +706,7 @@ def main():
               test_summoning, test_sprites, test_routing, test_the_floor,
               test_layout, test_wake, test_desk, test_vault, test_radios,
               test_undo_filing, test_settings, test_approvals_bounded,
+              test_install_over_itself,
               test_one_watcher,
               test_clipboard, test_party):
         t()

@@ -18,6 +18,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
 def _bundle_root():
     """The folder holding Python\ and App\ - the card's root.
@@ -67,6 +68,78 @@ def size_of(path):
                for r, _, fs in os.walk(path) for f in fs)
 
 
+def stop_running():
+    """Close anything already running out of the target folder.
+
+    Installing over a running copy is the ordinary case - it is how you update
+    - and it used to fail halfway: Windows will not let you overwrite a DLL a
+    live process has loaded, so the copy died on python3.dll with a
+    PermissionError. Because the runtime is copied before the app and the
+    vault, what that left behind was half a Python, no app at all, and no
+    startup entry. It looked like something had deleted the install.
+    """
+    if sys.platform != "win32":
+        return 0
+    # Match on the Windows spelling of the path. TARGET is built from
+    # LOCALAPPDATA, which can arrive with forward slashes, while a process
+    # command line always has backslashes - so comparing them raw matches
+    # nothing and the stop silently does nothing at all.
+    where = os.path.normpath(TARGET).replace("'", "''")
+    ps = ("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine "
+          "-like '*%s*' -and $_.Name -like 'python*' } | ForEach-Object "
+          "{ Stop-Process -Id $_.ProcessId -Force; $_.ProcessId }" % where)
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
+                              "-Command", ps],
+                             capture_output=True, text=True, timeout=40)
+        killed = [x for x in (out.stdout or "").split() if x.strip().isdigit()]
+    except Exception:                                         # noqa: BLE001
+        return 0
+    if killed:
+        print("   closed %d running copy/copies first" % len(killed))
+        time.sleep(1.5)                    # let Windows release the handles
+    return len(killed)
+
+
+def place(src, dst):
+    """Copy one file, even if something still has the old one open.
+
+    Windows refuses to overwrite a loaded DLL but will happily rename it, so
+    the old one is moved aside and the new one written in its place. The
+    leftover is deleted on the next install, or by Windows at the next reboot.
+    """
+    try:
+        shutil.copy2(src, dst)
+        return
+    except PermissionError:
+        pass
+    aside = dst + ".old"
+    try:
+        if os.path.exists(aside):
+            os.remove(aside)
+    except OSError:
+        aside = "%s.old%d" % (dst, int(time.time()))
+    os.replace(dst, aside)                 # allowed even while it is loaded
+    shutil.copy2(src, dst)
+
+
+def sweep_old(root=None):
+    """Clear the files a previous update had to move aside."""
+    root = root or TARGET
+    gone = 0
+    for here, _dirs, files in os.walk(root):
+        for f in files:
+            if f.endswith(".old") or ".old" in f[-16:]:
+                try:
+                    os.remove(os.path.join(here, f))
+                    gone += 1
+                except OSError:
+                    pass                   # still held; next time
+    if gone:
+        print("   cleared %d leftover file(s) from a previous update" % gone)
+    return gone
+
+
 def copy(src, dst, label):
     if not os.path.isdir(src):
         return 0
@@ -76,7 +149,9 @@ def copy(src, dst, label):
         out = dst if rel == "." else os.path.join(dst, rel)
         os.makedirs(out, exist_ok=True)
         for f in files:
-            shutil.copy2(os.path.join(here, f), os.path.join(out, f))
+            if f.endswith(".old") or ".old" in f[-16:]:
+                continue                   # a leftover from a previous update
+            place(os.path.join(here, f), os.path.join(out, f))
             n += 1
             if n % 200 == 0:
                 sys.stdout.write("\r   %-14s %5d files" % (label, n))
@@ -137,6 +212,8 @@ def main():
                if os.path.isdir(os.path.join(CARD, p)))
     print("   %.0f MB" % (want / 1048576.0))
     os.makedirs(TARGET, exist_ok=True)
+    stop_running()
+    sweep_old()
     for folder, label in parts:
         copy(os.path.join(CARD, folder), os.path.join(TARGET, folder), label)
     os.makedirs(os.path.join(TARGET, "State"), exist_ok=True)
