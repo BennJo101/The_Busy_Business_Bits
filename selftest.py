@@ -608,6 +608,32 @@ def test_board_labels():
           len("set up a computer: BusyBusinessBits") <= COLS)
     check("wrapped body text fits the screen",
           all(len(l) <= COLS for l in wrap("a " * 200, COLS)))
+
+    # The roster used to stop at six names and then stop again at the edge of
+    # the line, so a full room showed two of them and no sign there were more.
+    rows_of = ns["name_rows"]
+    roster = [n.replace("The ", "") for n in core.BITS]
+
+    def widest(rows):
+        return max([8 + sum(8 * len(n) + 14 for n in r) - 14
+                    for r in rows] or [0])
+
+    packed = rows_of(roster, 3)
+    flat = [n for r in packed for n in r]
+    check("the whole roster fits on the board", flat == roster,
+          "%d of %d: %s" % (len(flat), len(roster), packed))
+    check("and no row runs off the screen", widest(packed) <= 320,
+          "%dpx" % widest(packed))
+    check("it takes no more rows than it is given", len(packed) <= 3, len(packed))
+    check("an empty room packs to nothing", rows_of([], 3) == [])
+    squeezed = rows_of(roster, 1)
+    check("a roster that will not fit says how many are missing",
+          squeezed and squeezed[-1][-1].startswith("+"), squeezed)
+    check("and that still fits", widest(squeezed) <= 320,
+          "%dpx" % widest(squeezed))
+    long_names = ["Investigator"] * 9
+    check("the longest names still fit", widest(rows_of(long_names, 3)) <= 320,
+          "%dpx" % widest(rows_of(long_names, 3)))
     check("a word longer than the screen is broken, not dropped",
           "".join(wrap("z" * 100, COLS)) == "z" * 100)
 

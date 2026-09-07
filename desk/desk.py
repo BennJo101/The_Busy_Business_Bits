@@ -46,6 +46,40 @@ def fits(left, right, cols=COLS):
     return left[:max(0, keep)], right
 
 
+GAP = 14                  # pixels between two names on the same row
+
+
+def name_rows(names, rows=3, width=320, margin=8, gap=GAP, cell=8):
+    """The roster packed into rows that actually fit across the screen.
+
+    The last row keeps a "+N" when there are more than will go, because a
+    list that silently stops is worse than a short one: the whole point of
+    showing who is in the room is knowing who is in the room.
+    """
+    out, row, x = [], [], margin
+    space = width - margin
+    for i, name in enumerate(names):
+        need = cell * len(name)
+        if row and x + need > space:
+            out.append(row)
+            if len(out) == rows:                    # no room for another line
+                left = len(names) - i
+                if left:
+                    tail = "+%d" % left
+                    while out[-1] and (margin + sum(cell * len(n) + gap
+                                                    for n in out[-1])
+                                       + cell * len(tail)) > space:
+                        out[-1].pop()
+                    out[-1].append(tail)
+                return out
+            row, x = [], margin
+        row.append(name)
+        x += need + gap
+    if row:
+        out.append(row)
+    return out
+
+
 def wrap(text, cols):
     """Break a line to fit, on spaces where it can."""
     out, line = [], ""
@@ -136,6 +170,7 @@ class Desk:
         self.d.text(text[:26], 8, 9, ink, colour)
 
     ROWS = 13                 # lines of transcript that fit between the bars
+    ROOM_ROWS = 3             # rows the roster may take before it says "+N"
 
     def lines(self):
         """The whole room, flattened to drawable lines.
@@ -184,22 +219,36 @@ class Desk:
         here = self.room.get("in") or []
         d.text("in the room" if here else "nobody in the room", 8, 38,
                self.DIM, self.INK)
-        x = 8
-        for name in here[:6]:
-            if x + 8 * len(name) + 10 > T.W:
-                break
-            x += d.text(name, x, 56, self.colour_of(name), self.INK) + 14
-        d.fill(8, 84, T.W - 16, 1, d.rgb(60, 45, 52))
+        # Every name, wrapped. It used to stop at six and then stop again at
+        # the edge of the line, so with the whole roster in the room the board
+        # showed two of them and no sign there were more - which is the one
+        # moment the list is worth having.
+        y = 56
+        for row in name_rows(here, self.ROOM_ROWS):
+            x = 8
+            for name in row:
+                x += d.text(name, x, y, self.colour_of(name), self.INK) + GAP
+            y += 14
+        if here:
+            y += 2
+
+        d.fill(8, y, T.W - 16, 1, d.rgb(60, 45, 52))
+        y += 10
         who, say = self.room.get("who") or "", self.room.get("say") or ""
         if who:
-            d.text(who + ":", 8, 96, self.colour_of(who), self.INK)
+            d.text(who + ":", 8, y, self.colour_of(who), self.INK)
             if self.log:
                 # say so, because a region that does something when pressed
                 # and looks exactly like one that does not is not a control
                 note = "tap to read (%d)" % len(self.log)
-                d.text(note, T.W - 8 * len(note) - 8, 96, self.DIM, self.INK)
-        y = 116
-        for line in wrap(say, 38)[:2]:
+                d.text(note, T.W - 8 * len(note) - 8, y, self.DIM, self.INK)
+            y += 16
+        # Whatever is left between the names and the strip. A crowded room
+        # gets fewer lines of what was said, which is the right way round -
+        # the transcript is a tap away and the roster is not.
+        for line in wrap(say, COLS):
+            if y > 144 - 14:
+                break
             d.text(line, 8, y, self.PAPER, self.INK)
             y += 14
         # A tappable strip of its own. The portal has to be reachable from
