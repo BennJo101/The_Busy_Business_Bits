@@ -544,6 +544,21 @@ def test_undo_filing():
         tools._save(tools.FILINGS_PATH, keep)   # leave the real log alone
 
 
+def test_one_watcher():
+    print("only one watcher")
+    import bits_desk
+    if sys.platform != "win32":
+        check("not Windows - the guard stands aside", bits_desk.only_one())
+        return
+    # The installer starts a watcher and also registers one at login, so the
+    # next reboot has two, and they fight over the one serial port. Whichever
+    # wins decides whether START works, which looks like a board fault.
+    name = "BitsSelftest%d" % os.getpid()
+    check("the first one gets the port", bits_desk.only_one(name))
+    check("a second one stands down", not bits_desk.only_one(name))
+    check("an unrelated name is unaffected", bits_desk.only_one(name + "b"))
+
+
 def test_settings():
     print("settings")
     import json
@@ -626,7 +641,8 @@ def main():
     for t in (test_room_rules, test_ask_bit, test_ownership, test_gate,
               test_summoning, test_sprites, test_routing, test_the_floor,
               test_layout, test_wake, test_desk, test_vault, test_radios,
-              test_undo_filing, test_settings, test_clipboard, test_party):
+              test_undo_filing, test_settings, test_one_watcher,
+              test_clipboard, test_party):
         t()
     print()
     if FAILED:

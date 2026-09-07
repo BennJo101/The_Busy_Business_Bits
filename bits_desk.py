@@ -281,6 +281,37 @@ def _detail(item):
     return item.get("summary", "")
 
 
+def only_one(name="BusyBusinessBitsDesk"):
+    """True if this is the only watcher running.
+
+    Two of them is not a hypothetical: the installer starts one and also
+    registers one at login, so the next reboot has a pair. They then fight
+    over the serial port - one takes it, the other finds nothing and waits
+    forever - and START works or does not depending on which won. That looks
+    exactly like a board fault, and it is not one.
+
+    A named mutex rather than a pid file: it goes away when the process does,
+    including when the process is killed, so there is no stale lock to explain
+    to anyone.
+    """
+    if sys.platform != "win32":
+        return True                    # nothing carries this off Windows yet
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.windll.kernel32
+        k32.CreateMutexW.argtypes = [wintypes.LPCVOID, wintypes.BOOL,
+                                     wintypes.LPCWSTR]
+        k32.CreateMutexW.restype = wintypes.HANDLE
+        handle = k32.CreateMutexW(None, True, "Global\\" + name)
+        if not handle:
+            return True                # cannot tell; do not stop the user
+        globals()["_MUTEX"] = handle   # held for the life of the process
+        return k32.GetLastError() != 183          # ERROR_ALREADY_EXISTS
+    except Exception:                                         # noqa: BLE001
+        return True
+
+
 def watch():
     """Wait for START on the board, then start the Bits.
 
@@ -294,6 +325,11 @@ def watch():
     import os
     import subprocess
     import sys
+
+    if not only_one():
+        print("a desk watcher is already running - leaving it to it.",
+              flush=True)
+        return
 
     here = os.path.dirname(os.path.abspath(__file__))
     app = os.path.join(here, "busy_business_bits.py")
