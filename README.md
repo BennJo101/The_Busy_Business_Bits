@@ -495,8 +495,11 @@ the last one: it copies the runtime, the app and the vault into
 watcher is running from login. After that the board is enough on its own — plug
 it in, press START, and the Bits come up with nothing else running first.
 
-Nothing goes outside your own profile, and the uninstaller leaves `State\`
-alone so the notes and the API key survive it.
+Nothing goes outside your own profile, and the uninstaller leaves `State\` and
+`Vault\` alone — the approval history and the notes are yours, not the
+installer's. The API key is never on the card at all: it lives in
+`~/.busy_business_bits.json` on whichever machine you typed it into, and an
+install reads that machine's copy rather than starting one of its own.
 
 #### What can and cannot come down the wire
 
@@ -508,13 +511,69 @@ The board is a 7.2KB/s serial link, which is the whole constraint:
 | the Python runtime | 78 MB | about three hours |
 | Obsidian | 290 MB | about eleven and a half |
 
-So a machine that already has Python can be served entirely by the board. A
-machine with nothing needs the runtime to arrive another way — the card in a
-reader once, or a download from python.org.
+So a machine that already has Python can be served entirely by the serial link.
+A machine with **nothing** is served by the board's own WiFi instead, which is
+the next section — three hours of wire becomes about a minute of radio.
 
-This chip cannot do better: it talks through a CH340 serial bridge and has no
-USB peripheral, so it can never present the card to Windows as a drive. An
-ESP32-S3 has native USB, which is what that would take.
+This chip cannot do better on the wire: it talks through a CH340 serial bridge
+and has no USB peripheral, so it can never present the card to Windows as a
+drive. An ESP32-S3 has native USB, which is what that would take.
+
+#### Handing over to a computer with nothing on it
+
+The board broadcasts its own network, serves the whole bundle over it, and
+takes the machine's WiFi details back so it can carry on afterwards. Nothing
+needs to be installed first, and the card never leaves the board.
+
+1. Press **hand over to a new computer**, the strip just above START. The
+   board brings up an access point called **BusyBusinessBits** and shows the
+   password and address on its screen. Pressing it again stops it.
+2. Join it from the new machine and open <http://192.168.4.1/>.
+3. Take *Download the Bits* — about 35 MB, a minute or so.
+4. Unzip it and run **Install on this computer.bat**.
+5. The same page has a form for the machine's own network, so the board can
+   leave its access point and join that instead.
+
+What arrives is a complete, relocatable CPython with Tkinter, Pillow,
+pyserial, and SpeechRecognition — everything the Bits need, including the wake
+word. It does not touch any Python already on the machine.
+
+#### Taking files off the card over WiFi
+
+The other direction has a fast path too. `desk/net_carry.py` puts the board on
+a network, starts a small file server on it, and pulls the card's contents over
+TCP instead of the serial line:
+
+```
+python desk/net_carry.py --ssid NAME --password SECRET --unload DIR
+python desk/net_carry.py --ssid NAME --password SECRET --speed
+```
+
+The password joins the board to the network and is never written down.
+
+The server, its framing and its path guard are tested — `desk/board_check.py`
+runs both ends on the board over loopback, so a listing, a file read checked
+against the copy here, and two attempts to read outside the card are covered.
+That test needs the board, which is why it lives there and not in `selftest`.
+The
+radio hop itself is not: it needs a real network's credentials, so it has never
+been run end to end. **Serial is the proven path in this direction.** The
+board's radio is not in doubt — the handover above uses it — but treat this
+particular script as untried until you have run it once yourself.
+
+Putting the bundle on the card in the first place is the slow half, and it is
+done from a machine that already has the project:
+
+```
+python desk/carry_bits.py --payload bits.zip
+```
+
+35 MB at 7.7KB/s is about seventy-five minutes. It resumes: the card's copy is
+hashed against yours before a byte is appended, so an interrupted transfer
+carries on rather than starting again, and a different build is detected and
+replaced rather than spliced. The board checks the finished file's sha256
+itself, because a copy that says it arrived and did not is worse than one that
+admits it failed.
 
 ### The light
 

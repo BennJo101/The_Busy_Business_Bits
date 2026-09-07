@@ -13,6 +13,55 @@ os.chdir(HERE)
 import bits_desk
 
 RESULTS = []
+# Runs on the board: netserve on one side, a client on the other, over
+# 127.0.0.1. Newlines are built with chr(10) rather than written as escapes -
+# this source goes through a raw REPL, and an escape does not always survive
+# the trip.
+LOOPBACK = """
+import socket, struct, _thread, time, uhashlib, ubinascii
+import netserve, carrier
+NL = chr(10)
+carrier.mount()
+_thread.start_new_thread(netserve.serve, ())
+time.sleep(1)
+
+def exact(sock, n):
+    out = b''
+    while len(out) < n:
+        part = sock.recv(n - len(out))
+        if not part:
+            raise OSError('hung up')
+        out += part
+    return out
+
+def reply(sock):
+    return exact(sock, struct.unpack('<I', exact(sock, 4))[0])
+
+s = socket.socket()
+s.connect(('127.0.0.1', 8266))
+
+s.send(('LIST /sd/BusyBusinessBits' + NL).encode())
+rows = reply(s).decode().splitlines()
+print('rows=' + str(len(rows)))
+first = rows[0].split(chr(9))[0] if rows else ''
+print('first=' + first)
+
+s.send(('GET /sd/BusyBusinessBits/' + first + NL).encode())
+blob = reply(s)
+print('bytes=' + str(len(blob)))
+print('sha=' + ubinascii.hexlify(uhashlib.sha256(blob).digest()).decode()[:16])
+
+s.send(('GET /etc/passwd' + NL).encode())
+print('outside=' + str(len(reply(s)) == 0))
+
+s.send(('GET /sd/BusyBusinessBits/../../secret' + NL).encode())
+print('dotdot=' + str(len(reply(s)) == 0))
+
+s.send(('BYE' + NL).encode())
+s.close()
+"""
+
+
 def check(name, ok, detail=""):
     RESULTS.append((name, ok))
     print("   %-46s %s%s" % (name, "PASS" if ok else "FAIL",
@@ -61,6 +110,30 @@ try:
     here = open(want, "rb").read()
     check("a file read off it is byte-for-byte right", blob == here,
           "%d bytes, sha %s" % (len(blob), hashlib.sha256(blob).hexdigest()[:16]))
+
+    # The file server, both ends on the board over loopback. net_carry's
+    # client normally runs on a PC that has joined the board's network, and
+    # that hop needs a real network's password - but the framing, the path
+    # guard and the file read do not, and they are the parts that can be
+    # wrong quietly.
+    print("\n[2b] the file server, over the board's own loopback", flush=True)
+    out = b.run(LOOPBACK, timeout=180)
+    got = {}
+    for line in out.splitlines():
+        k, _, v = line.strip().partition("=")
+        if v:
+            got[k] = v
+    check("it lists the card over TCP", int(got.get("rows", 0)) > 0,
+          "%s files" % got.get("rows"))
+    check("a file served over TCP matches the one here",
+          got.get("sha") and got.get("sha") == hashlib.sha256(
+              open(os.path.join(HERE, got.get("first", "")), "rb").read()
+          ).hexdigest()[:16] if got.get("first") else False,
+          got.get("first"))
+    check("it refuses to serve anything off the card",
+          got.get("outside") == "True")
+    check("and refuses to be walked out of it with ..",
+          got.get("dotdot") == "True")
 finally:
     if b:
         b.restart(); b.close()
