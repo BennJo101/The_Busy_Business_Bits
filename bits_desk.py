@@ -171,6 +171,13 @@ class Desk:
             if wait:
                 wait[1] = msg
                 wait[0].set()
+        elif kind == "calibrated":
+            # only ever one of these outstanding - it needs a person at the
+            # board pressing crosses, so a second would have nobody to press it
+            wait = self._waits.get("calibrate")
+            if wait:
+                wait[1] = msg
+                wait[0].set()
         elif kind == "start":
             self._last_ask = None
             if self.on_start:
@@ -222,6 +229,30 @@ class Desk:
             return {"ok": True, "out": msg.get("out")}
         finally:
             self._waits.pop(call_id, None)
+
+    def calibrate(self, timeout=240.0):
+        """Have the board map its touch panel to its screen.
+
+        Long by the standards of everything else here, and it has to be: three
+        crosses have to be found and pressed by a person who may be across the
+        room from the board when the Wizard is asked to do this.
+        """
+        if not self.here():
+            return {"ok": False, "error": "no desk unit plugged in"}
+        if "calibrate" in self._waits:
+            return {"ok": False, "error": "a calibration is already running"}
+        gate = [threading.Event(), None]
+        self._waits["calibrate"] = gate
+        try:
+            if not self.send({"t": "calibrate"}):
+                return {"ok": False, "error": "the desk unit stopped listening"}
+            if not gate[0].wait(timeout):
+                return {"ok": False,
+                        "error": "nobody pressed the crosses within %ds"
+                                 % int(timeout)}
+            return gate[1] or {"ok": False, "error": "it wouldn't say"}
+        finally:
+            self._waits.pop("calibrate", None)
 
     def note(self, text):
         if self.on_note:

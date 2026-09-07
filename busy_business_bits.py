@@ -967,6 +967,7 @@ class App:
             bits_tools.ON_APPROVAL_NEEDED = self._approval_raised
             bits_tools.ON_FLOOR = self._floor_request
             bits_tools.ON_RADIO = self._desk_radio
+            bits_tools.ON_CALIBRATE = self._desk_calibrate
             bits_tools.USE_BOARD_NET = bool(self.settings.get("board_net"))
         try:
             self.ambient = bits_ambient.Ambient() if bits_ambient else None
@@ -1256,6 +1257,19 @@ class App:
                     if i["state"] == "pending"]
         except Exception:                                         # noqa: BLE001
             return []
+
+    def _desk_calibrate(self):
+        """The Wizard, having the board learn where its own screen is.
+
+        Runs on the Bit's worker thread and blocks there for as long as it
+        takes somebody to reach the board and press three crosses, which is
+        why it is not on the UI thread.
+        """
+        if not self.desk:
+            return {"ok": False, "error": bits_tools.NO_RADIO}
+        self.root.after(0, lambda: self.console.room_sys(
+            "the desk unit is showing three crosses - press each one."))
+        return self.desk.calibrate()
 
     def _desk_radio(self, do, timeout=40.0, **args):
         """A Bit reaching for the board's own WiFi or Bluetooth.

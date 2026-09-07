@@ -2088,6 +2088,34 @@ def t_board_leave(bit):
     return "the board's radio is off."
 
 
+# Set by the app to the desk unit's calibrate(). Its own hook rather than a
+# radio call: it takes minutes rather than seconds, because it is waiting on a
+# person to walk over and press three crosses.
+ON_CALIBRATE = None
+
+
+@tool("board_calibrate", "Have the desk unit learn where its touch screen is. It "
+      "draws three crosses and asks whoever is there to press them. Use it when "
+      "presses land somewhere other than what was pressed - START needing two "
+      "goes, or the wrong thing opening.",
+      WRITE, "The Wizard", {}, [])
+def t_board_calibrate(bit):
+    if ON_CALIBRATE is None:
+        return NO_RADIO
+    try:
+        got = ON_CALIBRATE()
+    except Exception as e:                                        # noqa: BLE001
+        return "the desk unit: %r" % e
+    if not got.get("ok"):
+        return ("the screen was not calibrated: %s Nothing was changed, so it "
+                "reads exactly as it did before."
+                % got.get("error", "it wouldn't say"))
+    off = got.get("off") or []
+    return ("the screen is calibrated%s. It was checked against a third press "
+            "it was not fitted to, so this is measured rather than assumed."
+            % (" - every cross within %d pixels" % max(off) if off else ""))
+
+
 ROUTINES = {
     "morning": ["The Secretary: morning_brief", "The Boss: metrics_pulse",
                 "The Ghost: one abandoned thing"],

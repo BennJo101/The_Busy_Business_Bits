@@ -326,6 +326,52 @@ class Desk:
         d.fill(0, 174, T.W, 66, self.DARK)
         d.text("tap to stop", (T.W - 8 * 11) // 2, 200, self.GOLD, self.DARK)
 
+    # Where the crosses go. Well inside the edges, because the panel is least
+    # linear at its rim, and far apart, because a short baseline multiplies
+    # every millimetre of thumb into pixels of error. The third is only
+    # checked against, never fitted - it is how a bad calibration is caught
+    # before it is kept.
+    TARGETS = [(40, 40), (280, 200), (160, 120)]
+
+    def cross(self, x, y, n, of):
+        d = self.d
+        d.clear(self.INK)
+        self.header("CALIBRATING THE SCREEN", self.DARK, self.GOLD)
+        d.text("press the middle of the cross", 8, 40, self.PAPER, self.INK)
+        d.text("%d of %d" % (n, of), 8, 58, self.DIM, self.INK)
+        d.fill(x - 12, y, 25, 1, self.GOLD)
+        d.fill(x, y - 12, 1, 25, self.GOLD)
+        d.fill(x - 2, y - 2, 5, 5, self.RED)
+
+    def calibrate(self):
+        """Three presses, and the panel knows where the screen is.
+
+        Returns what to say about it. Nothing is kept unless the third press
+        lands where the first two say it should: a calibration that is quietly
+        wrong makes every button on this board miss, which is far worse than
+        one that says it could not do it.
+        """
+        readings = []
+        for i, (x, y) in enumerate(self.TARGETS):
+            self.cross(x, y, i + 1, len(self.TARGETS))
+            got = self.t.press(seconds=60)
+            if not got:
+                self.dirty = True
+                return {"ok": False, "error": "nothing was pressed"}
+            readings.append(got)
+        cal = self.t.calibrate(self.TARGETS, readings)
+        if not cal:
+            self.dirty = True
+            return {"ok": False, "error": "those presses do not make a screen"}
+        off, good = self.t.check(cal, self.TARGETS, readings)
+        if not good:
+            self.dirty = True
+            return {"ok": False, "error": "off by %s px - not kept" % max(off),
+                    "off": off}
+        self.t.adopt(cal)
+        self.dirty = True
+        return {"ok": True, "cal": cal, "off": off}
+
     def radio(self, msg):
         """Anything that needs the board's own WiFi or Bluetooth.
 
@@ -416,6 +462,10 @@ class Desk:
             # deliberately not t.get(): that consumes the press and resets the
             # debounce, so asking what the screen sees would take the press
             # away from the loop that acts on it
+        elif kind == "calibrate":
+            out = self.calibrate()
+            out["t"] = "calibrated"
+            self.send(out)
         elif kind == "tap":
             # A press, sent down the wire. The screen has no other way of
             # being exercised without a thumb, and "does the transcript
