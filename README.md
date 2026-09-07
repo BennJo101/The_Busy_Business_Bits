@@ -22,7 +22,7 @@ Bits could plausibly own a job, the job is split wrong.
 | **Investigator** | dig | Fetches and reads web pages, extracts PDF text, hunts logs, builds dossiers from local files |
 | **Reaper** | cut | Disk audit, duplicate detection, startup items, abandoned programs, process control |
 | **Secretary** | schedule | Tasks with owners and dates, morning brief, end-of-day reckoning |
-| **Wizard** | orchestrate | Summons and dismisses the other Bits on request, named multi-Bit routines, system state, installs |
+| **Wizard** | orchestrate | Summons and dismisses the other Bits on request, takes every unaddressed line and routes it, puts a question to the whole room, named multi-Bit routines, system state, installs |
 | **Ghost** | remember | Finds what stopped moving and makes you give it a verdict: revive, kill or haunt |
 | **Librarian** | file | Indexes documents, searches by name and content, tracks which version supersedes which |
 
@@ -74,7 +74,9 @@ Reaper:  Fourteen gigabytes in Downloads hasn't moved since March.
 
 Naming a Bit is you doing the routing yourself, and it still reaches them
 directly — as does typing into a Bit's own text box, which is as addressed as it
-gets. Everything else goes through the desk.
+gets. Name three and all three answer; a line can bring in `MAX_NAMED` at once,
+and so can a Bit, so a question with more than one owner reaches all of them.
+Everything else goes through the desk.
 
 It used to fall to whoever happened to be on screen first instead, which made
 the answer depend on summoning order: the same question got the Coder on Monday
@@ -83,6 +85,34 @@ it happens even with *let Bits answer each other* switched off — what the Bit 
 hands it to says next is chatter again, and that switch still governs it. Your
 line goes up on the receiving Bit's card as it arrives, so its transcript reads
 as a conversation with you rather than opening on an answer to nothing.
+
+## Asking the room
+
+Some questions don't belong to one Bit. Ask what everyone thinks and the Wizard
+opens the floor: every Bit gets summoned and answers in its own turn, hearing
+everything said before it.
+
+```
+You:       what does everyone think - do we ship on Friday?
+Wizard:    Gather round, all of you.
+Boss:      Numbers first. What's the burn?
+Reaper:    Ship it. Nothing here is load-bearing.
+Coder:     ...
+Secretary: Then Thursday is the last day to say no.
+```
+
+The Coder there isn't broken — that's him passing. **Each Bit decides for itself
+whether to speak**, and the rules tell it that saying nothing is a real answer:
+never restate what another Bit already said, add to it, sharpen it, disagree, or
+pass. A round where all nine chime in every time is noise, so a Bit with nothing
+to add replies with a bare `...`, which never reaches the room or its voice — the
+console notes that it passed and its own card says *(nothing to add)*.
+
+A round is deliberately terminal: everyone in it already has a turn coming, so
+nobody in it starts a chain of their own. That's what keeps one question from
+turning into a hundred lines. `open_floor` is the Wizard's tool and his alone,
+and it takes a subset too — *"Boss, Coder and Reaper, between the three of you"* —
+when the whole roster isn't the point.
 
 ## Summoning
 
@@ -93,6 +123,13 @@ You:     Wizard, I need the Coder in here.
 Wizard:  Okay... BAM! Coder, take a look at this.
 Coder:   Give me the actual error, not the vibe of the error.
 ```
+
+A card is dealt into the first free space beside the console, then under it,
+then anywhere in the work area — checked against what is actually on screen, at
+the size a card actually is, so two never land on each other and one that is
+dismissed leaves a gap the next summoning takes. On a screen too small to hold
+them all they overlap as little as they can, and every card keeps a corner
+showing to be seen and grabbed by.
 
 Summoning is a real tool the Wizard owns, not a line he says — he casts, the Bit
 lands on the sparkle at the end of the cast, and the handoff waits for it, so the
@@ -111,9 +148,9 @@ The Bits do it to each other too, which is what makes the chains work. The
 Courier saying *"Librarian, this one's yours"* fetches the Librarian; she reads
 the request off the room and files it. Before this, a handoff to anyone not
 already on screen simply fell on the floor — which quietly broke every routine
-started from an empty desk. Only the first name in a line summons, and only as
-deep as `MAX_CHAIN`, so a Bit reeling off the roster doesn't fill the desktop
-with it. Turn Bit-to-Bit chatter off with *let Bits answer each other* in
+started from an empty desk. Names summon, and only as
+deep as `MAX_CHAIN` and `MAX_NAMED` wide, so a Bit reeling off the roster
+doesn't fill the desktop with it. Turn Bit-to-Bit chatter off with *let Bits answer each other* in
 settings; the Wizard passing you on is delivery and keeps working either way.
 
 This works in `Demo The Bits.bat` too, with no API key — it's the one thing in
@@ -125,13 +162,49 @@ Every Bit exposes the same four, and the ones it can't fill it simply doesn't ha
 
 - **Ambient** — it watches something and speaks unprompted.
 - **Drop** — drag a file, folder or URL onto its card.
-- **Ask** — type or speak into its box.
+- **Ask** — type or speak into its box, or just say *"Bits"*.
 - **Scope** — what it's pointed at, set by where you put it.
 
 Scope is the interesting one. A Bit's working folder comes from where it physically
 sits, so the same character behaves differently on each screen with no configuration:
 the Coder on your code monitor watches that repo, and dragging a Bit onto an open
 folder window makes it adopt that folder until dismissed.
+
+## Saying "Bits"
+
+The wake word is **Bits**. Say it and whatever follows goes into the room
+exactly as if you had typed it into the console — so it lands on the Wizard's
+desk and he routes it, or reaches a Bit you name.
+
+```
+You:  "Bits, what does everyone think about shipping Friday?"
+You:  "Bits, Coder — is the repo clean?"
+You:  "Bits."   →   ...listening.   →   "how much disk have I got left?"
+```
+
+Saying the word on its own gives you twelve seconds to say the actual thing,
+which is easier than getting a whole sentence out in one go. Clicking **mic**
+does the same as saying the word, and the button goes gold while the room is
+listening.
+
+Two things it has to get right. The Bits answer *out loud*, and a microphone in
+the same room hears them, so it goes deaf while any of them is speaking — and
+for the whole of the party tune, or the Coder would wake the room by saying the
+word himself. And a phrase that isn't addressed to them is dropped without a
+trace: never logged, never shown, never sent to a Bit.
+
+It mishears in the useful direction. *Bit*, *bitz*, *bids*, *beats* and *busy
+business bits* all count, because the plural is what a recogniser drops most
+often and a wake word nobody can trigger is worse than one that occasionally
+mishears. *"Bit of a mess in Downloads"* and *"beats me"* are ordinary English
+carrying on, and don't wake anything.
+
+**What it costs:** the microphone stays open, and every phrase it hears is sent
+to Google's free transcription endpoint to find out whether you said the word.
+Turn it off with *listen for "bits"* in settings — the mic button still works
+as push-to-talk. Set `"wake_word"` in `~/.busy_business_bits.json` to change the
+word. Needs `SpeechRecognition` and `PyAudio`; without them it prints an install
+hint once and everything else works.
 
 ## Speaking first
 
@@ -155,6 +228,70 @@ are persisted, so it survives a restart), a global cooldown means two watchers
 going off together still produce one line, and a watcher's first poll records the
 world rather than announcing all of it. Turn the lot off with *let Bits speak up
 on their own* in settings.
+
+The sweep runs on a thread. A watcher does real work — the clipboard one launches
+PowerShell, others walk folders — and only summoned Bits are polled, so with the
+whole roster out every watcher is eligible on every sweep. On the main thread
+that measured as five stalls in twenty seconds, the worst 412ms, with nine cards
+animating through it.
+
+## The desk unit
+
+An **ESP32-2432S028** — the "cheap yellow display", a £12 board with a 2.8"
+touchscreen — plugged into USB becomes a physical approval gate.
+
+The gate is the one moment in this whole app that needs a person: a Bit reaches
+for something destructive, it queues instead of running, and nothing moves until
+someone says yes. That is a bad thing to bury in a chat window. On the desk unit
+it is a lit screen with the Bit's name in the Bit's own colour, what it wants to
+do, what it wants to do it to, and two buttons the size of your thumb.
+
+```
++------------------------------------------+
+|  THE REAPER WANTS TO         (his pink)   |
+|  delete_paths                             |
+|  Downloads/old-build.zip,                 |
+|  Downloads/vm-disk.vdi (+1 more)          |
+|  your call                                |
++---------------------+--------------------+
+|       REFUSE        |      APPROVE       |
++---------------------+--------------------+
+```
+
+The on-board LED pulses amber while something is waiting, goes green or red as
+you rule, and the rest of the time the screen shows the room — who is summoned,
+in their colours, and the last thing anyone said.
+
+A button goes straight through the Boss's own `approve` and `refuse` - the two
+tools that run directly because he *is* the gate. The desk stands in for his
+ruling rather than routing around it, so an approval granted there runs the
+queued tool exactly as it would have, and a refusal tells the Bit why.
+
+It talks over the USB lead it is already plugged into — one JSON object per
+line, 115200 baud. No wifi, so no credentials, no network, and nothing to
+configure. The app finds the board by saying hello to each serial port and
+seeing which one says hello back, reconnects on its own when it is unplugged,
+and works exactly as before when there is no board at all.
+
+| File | What it is |
+|---|---|
+| `bits_desk.py` | The PC side: finds the board, pushes state, receives rulings |
+| `desk/tft.py` | ILI9341 driver — no full framebuffer, the board has 160k of RAM |
+| `desk/touch.py` | XPT2046 touch, deliberately coarse |
+| `desk/desk.py` | The two screens and the line protocol |
+| `desk/main.py` | Runs it at boot |
+| `desk/flash_desk.py` | Puts it all on the board |
+
+Setting one up:
+
+```
+pip install pyserial esptool
+python desk/flash_desk.py --micropython ESP32_GENERIC-v1.29.0.bin
+```
+
+MicroPython goes on once; after that `python desk/flash_desk.py` just copies the
+four files, so changing the screen is a two-second round trip. Ctrl-C on the
+serial port drops to a REPL if you want to poke at it.
 
 ## Permissions and the gate
 
@@ -208,6 +345,20 @@ thinking sprite, so she simply sits at her counter while she works. Only the Wiz
 Bit he summons simply arrives — and it arrives on the BAM, once his cast has
 played out in full. The wait is read off the GIF rather than guessed, so
 replacing the art changes the timing with it.
+
+## Sprites and the main thread
+
+Nine animated cards is nine GIF loops on one thread, and the work that stutters
+it is not the animation — it is loading it. Opening a state, converting it and
+scaling it to 260px costs 30-150ms, and it used to be paid on the main thread
+the first time that state played: a Bit's first word, its first job and the
+first bar of the party each dropped frames, forty times over with everyone out.
+
+That decode is 85% of the cost and has no Tk in it, so it happens on a thread as
+a Bit is summoned — the Wizard's cast buys the time. Only the handover to Tk has
+to be on the main thread, about 11ms a state, and those are taken one per tick
+rather than forty at once. Measured across forty state changes with eight cards
+out: eight frame gaps over 100ms before, none over 60ms after.
 
 ## Voices
 

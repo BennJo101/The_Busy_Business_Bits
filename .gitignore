@@ -33,3 +33,6 @@ desktop.ini
 
 # Working notes and superseded drafts kept locally, not published
 _notes/
+
+# a 4MB copy of whatever was on the desk unit before it was flashed
+desk/factory-backup.bin

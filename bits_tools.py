@@ -1654,8 +1654,10 @@ def t_naming(bit, path=""):
 #
 #   ON_STAGE(action, bit_name) -> str      action is "summon" or "dismiss"
 #   STAGE_PRESENT() -> [bit_name, ...]     who is on the desktop right now
+#   ON_FLOOR(names, question) -> str       give each of them a turn on one question
 ON_STAGE = None
 STAGE_PRESENT = None
+ON_FLOOR = None
 
 NO_STAGE = "the room isn't listening - there's no desktop to cast onto."
 
@@ -1723,6 +1725,52 @@ def t_dismiss(bit, name):
     if here is not None and who not in here:
         return "%s isn't here to dismiss." % who
     return _stage("dismiss", who)
+
+
+def resolve_bits(who):
+    """'Boss, the Coder and Reaper' -> ['The Boss', 'The Coder', 'The Reaper'].
+
+    Blank means the whole roster. Fed by a spoken line, so it splits on commas,
+    "and", slashes and plain spaces and takes whatever resolves.
+    """
+    if not str(who).strip():
+        return [n for n in DEFAULT_SCOPE if n != "The Wizard"]
+    out = []
+    for part in re.split(r"[,/&]|\band\b|\s{2,}", str(who), flags=re.I):
+        got = resolve_bit(part)
+        if not got:                       # "Boss Coder Reaper" with no commas
+            for word in part.split():
+                w = resolve_bit(word)
+                if w and w not in out:
+                    out.append(w)
+            continue
+        if got not in out:
+            out.append(got)
+    return [n for n in out if n != "The Wizard"]
+
+
+@tool("open_floor", "Put one question to the whole room and let every Bit answer it in "
+      "its own turn. Cast this when you're asked what everyone thinks, or when a "
+      "decision wants more heads than one - not for a job that plainly belongs to a "
+      "single Bit. Anyone not in the room is summoned so they can speak, and each Bit "
+      "may pass if it has nothing to add. The round IS the handoff: say your piece and "
+      "stop, don't hand off to anyone afterwards.",
+      WRITE, "The Wizard",
+      {"question": _str("What is being put to the room, in one line."),
+       "who": _str("Optional: who gets the floor, e.g. 'Boss, Coder, Reaper'. "
+                   "Leave blank for the whole roster.")},
+      ["question"])
+def t_open_floor(bit, question, who=""):
+    names = resolve_bits(who)
+    if not names:
+        return ("there is nobody called '%s'. The roster is: %s" % (
+            who, ", ".join(sorted(n.replace("The ", "") for n in DEFAULT_SCOPE))))
+    if ON_FLOOR is None:
+        return NO_STAGE
+    try:
+        return ON_FLOOR(names, str(question).strip())
+    except Exception as e:                                        # noqa: BLE001
+        return "the floor wouldn't open: %r" % e
 
 
 ROUTINES = {

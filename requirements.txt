@@ -6,7 +6,11 @@
 # Sprite loading and GIF animation. Required.
 Pillow>=10.0
 
-# Push-to-talk "mic" button in the console. Optional — without these the
-# button just prints an install hint and the rest of the app works fine.
+# The "Bits" wake word, and the push-to-talk "mic" button. Optional — without
+# these the app says so once and everything else works fine.
 SpeechRecognition>=3.10
 PyAudio>=0.2.14
+
+# The desk unit (desk/) - an ESP32-2432S028 on USB as a physical approval gate.
+# Optional; with no board plugged in the app never notices.
+pyserial>=3.5

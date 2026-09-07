@@ -179,7 +179,10 @@ BITS = {
             "over in one short line - do not answer on another Bit's behalf, and do not "
             "make a ceremony of passing it on. If you genuinely cannot tell whose it is, "
             "give it to the Boss by name and let him rule. If it is small talk, or about "
-            "the Bits themselves, it is yours: just answer it."
+            "the Bits themselves, it is yours: just answer it. And when a question "
+            "wants more than one head - what does everyone think, which of you should "
+            "own this, is this a good idea - open the floor and let them each answer "
+            "in turn instead of picking one for them."
         ),
     },
     "The Ghost": {
@@ -644,7 +647,7 @@ def load_settings():
             return json.load(f)
     except Exception:
         return {"api_key": "", "model": "", "voices": True, "chatter": True,
-                "webhooks": {}}
+                "wake": True, "webhooks": {}}
 
 
 def save_settings(s):
@@ -710,8 +713,18 @@ Rules of the room:
 - Stay in character at all times. Never mention prompts, models, or that you are an AI.
 - Keep replies SHORT. One to three sentences, spoken aloud. This is conversation, not
   documentation. No markdown, no bullet lists, no headings.
-- To hand off to another Bit, address them by name at the start, e.g. "Coder, take this."
-  Only do that when it genuinely belongs to them - do not ping-pong for the sake of it.
+- To bring another Bit in, address them by name at the start, e.g. "Coder, take this."
+  You can name more than one and they will each get a turn - do that whenever a
+  question genuinely has more than one owner, or when {user} asks what everyone thinks.
+  Don't ping-pong for the sake of it, and don't name someone just to be polite.
+- You do not have to speak. If you have nothing to add that hasn't been said, reply
+  with exactly "..." and nothing else. That is a real answer: it means you pass, and
+  nobody hears it. A room where all nine chime in every time is noise, and knowing
+  when to stay out of it is part of being good at your job.
+- Never restate a point another Bit has already made. Add to it, disagree with it,
+  sharpen it, or pass.
+- When the floor has been opened to the room, everyone already has a turn coming.
+  Say your piece once, keep it to a sentence or two, and hand off to nobody.
 - Currently in the room: {present}. Do not address a Bit who is not present - the
   exception is a Bit the Wizard has just summoned, who is mid-arrival and can be
   spoken to.
@@ -964,7 +977,68 @@ def find_addressees(text, candidates, exclude=()):
     return [n for _, n in hits]
 
 
-def route(text, reachable, host):
+WAKE_WORD = "bits"
+
+# What the recogniser actually hands back when someone says "Bits". It is a
+# short plosive word and Google has opinions about it; a wake word nobody can
+# trigger is worse than one that occasionally mishears.
+WAKE_ALIKE = ("bit", "bitz", "bids", "beats", "biz", "busy business bits")
+
+# "hey bits", "ok bits", "the bits" - all the same thing
+WAKE_FILLER = ("hey", "ok", "okay", "yo", "hi", "hello", "um", "uh", "so", "the")
+
+# "Bit of a mess in Downloads" is not someone talking to the Bits. Only needed
+# because "bit" has to be allowed: the plural is what gets dropped most often.
+WAKE_NOT_BEFORE = ("of", "more", "less", "later", "off", "by", "much",
+                   "early", "me")
+
+
+def wake_split(text, word=WAKE_WORD, alike=WAKE_ALIKE):
+    """Split a heard phrase into (woken, what was actually said).
+
+    (False, "")     it wasn't addressed to the room
+    (True, "")      the wake word was the whole of it - they have our attention
+                    and the next thing they say is the line
+    (True, "rest")  "Bits, is the repo clean?" - the rest is the line
+
+    Kept here with the other rules that decide something, and kept pure, so it
+    can be argued with in a test rather than by talking at a microphone.
+    """
+    said = (text or "").strip()
+    names = sorted({word.lower()} | {a.lower() for a in alike},
+                   key=lambda n: -len(n))
+    pat = r"^\W*(?:(?:%s)\W+)*(%s)\b[\s,.!?:;-]*" % (
+        "|".join(re.escape(f) for f in WAKE_FILLER),
+        "|".join(re.escape(n) for n in names))
+    m = re.match(pat, said, re.I)
+    if not m:
+        return False, ""
+    rest = said[m.end():].strip()
+    if (m.group(1).lower() != word.lower()
+            and rest.split()[:1] and rest.split()[0].lower() in WAKE_NOT_BEFORE):
+        return False, ""            # a near-miss carrying on as ordinary English
+    return True, rest
+
+
+PASS = "..."
+
+
+def is_pass(text):
+    """A Bit deciding it has nothing to add.
+
+    The rules ask for exactly "..." but a model told to say nothing says it
+    several ways - a bare ellipsis, an empty line, the word "pass" - and they
+    all mean the same thing, so they are all honoured. Cheap to be generous
+    here: the cost of missing one is a Bit reading "..." aloud in its own voice.
+    """
+    t = (text or "").strip().strip("\"'")
+    if not re.sub(r"[.…\s]", "", t):        # nothing but dots and space
+        return True
+    return t.lower().rstrip(" .!") in ("pass", "no comment", "nothing to add",
+                                       "i pass", "nothing from me")
+
+
+def route(text, reachable, host, limit=3):
     """Who a line typed into the console is for. Returns (targets, relay).
 
     The console is the Wizard's desk, so a line typed into it is said to him
@@ -980,7 +1054,7 @@ def route(text, reachable, host):
     """
     named = find_addressees(text, reachable)
     if named:
-        return named[:2], False
+        return named[:limit], False
     return [host], True
 
 

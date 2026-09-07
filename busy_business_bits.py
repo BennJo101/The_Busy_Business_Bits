@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk
@@ -28,6 +29,11 @@ try:                    # needs HERE on the path first
     import bits_ambient  # noqa: E402
 except Exception:        # noqa: BLE001
     bits_ambient = None
+
+try:                    # the desk unit, if one is plugged in
+    import bits_desk     # noqa: E402
+except Exception:        # noqa: BLE001
+    bits_desk = None
 
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 LOG = os.path.join(HERE, "bits_install_log.txt")
@@ -124,15 +130,22 @@ from bits_core import (  # noqa: E402
     BITS, PARTY_BEAT, SHORT, FRAME_DARK, FRAME_GOLD, SKY, GROUND, INK, PAPER,
     ApiError, Konami, Speaker, ask_bit, available_bits, discover_sprites,
     find_addressees, list_models, load_settings, pick_default_model,
-    route, save_settings, synth_song, synth_voice,
+    is_pass, route, save_settings, synth_song, synth_voice, wake_split,
 )
+from bits_core import WAKE_WORD  # noqa: E402
 # already imported (or already failed to import) inside bits_core, so take its
 # copy rather than risk a second, differently-configured module object
 from bits_core import bits_tools  # noqa: E402
 
 CARD = 260          # rendered sprite size, px
+CARD_GAP = 16       # breathing room between cards, px
+CARD_CORNER = 64    # of a card that must stay visible when they can't all fit
 CHAT_H = 7          # transcript rows
-MAX_CHAIN = 3       # how far a Bit-to-Bit conversation may cascade
+# How far a Bit-to-Bit conversation may cascade. Four rather than three because
+# the console goes through the Wizard now: the desk spends the first step, and
+# without the extra one every line you type reaches one fewer Bit than it used to.
+MAX_CHAIN = 4
+MAX_NAMED = 3       # how many Bits one line may bring in at once
 HOST = "The Wizard"  # runs the console; never gets a window of his own
 BOSS = "The Boss"    # holds the gate, so he gets fetched when one is hit
 
@@ -153,7 +166,8 @@ def make_dpi_aware():
 class Animator:
     """Plays a GIF into a Label, honouring per-frame durations. NEAREST scaling."""
 
-    _cache = {}
+    _cache = {}     # (path, size) -> ([PhotoImage], [ms])  - main thread only
+    _pil = {}       # (path, size) -> ([Image], [ms])       - decoded, not yet Tk
 
     def __init__(self, widget, size):
         self.widget = widget
@@ -165,18 +179,49 @@ class Animator:
         self.path = None
 
     @classmethod
+    def prepare(cls, path, size):
+        """Decode a sprite. Safe on a worker thread - this is the slow half.
+
+        Opening, converting and resizing a state costs 30-150ms and is 85% of
+        what a sprite costs; it is also pure PIL, with no Tk in it. Handing the
+        frames to Tk is the other 15% and has to happen on the main thread, so
+        that part waits for `adopt`.
+        """
+        key = (path, size)
+        if key in cls._cache or key in cls._pil:
+            return False
+        frames, durations = [], []
+        with Image.open(path) as im:
+            for fr in ImageSequence.Iterator(im):
+                frames.append(fr.convert("RGBA").resize((size, size), Image.NEAREST))
+                durations.append(max(40, int(fr.info.get("duration", 100) or 100)))
+        cls._pil[key] = (frames, durations)
+        return True
+
+    @classmethod
+    def adopt(cls, path, size):
+        """Hand a prepared sprite to Tk. Main thread only."""
+        key = (path, size)
+        if key in cls._cache:
+            # the main thread wanted it before the warmer got here and decoded
+            # its own copy; drop the spare rather than leave it in memory
+            cls._pil.pop(key, None)
+            return
+        cls._load(path, size)
+
+    @classmethod
     def _load(cls, path, size):
         key = (path, size)
         if key in cls._cache:
             return cls._cache[key]
-        frames, durations = [], []
-        with Image.open(path) as im:
-            for fr in ImageSequence.Iterator(im):
-                f = fr.convert("RGBA").resize((size, size), Image.NEAREST)
-                frames.append(ImageTk.PhotoImage(f))
-                durations.append(max(40, int(fr.info.get("duration", 100) or 100)))
-        cls._cache[key] = (frames, durations)
-        return frames, durations
+        got = cls._pil.pop(key, None)       # prepared on a thread already
+        if got is None:
+            cls.prepare(path, size)
+            got = cls._pil.pop(key, ([], []))
+        frames, durations = got
+        out = ([ImageTk.PhotoImage(f) for f in frames], durations)
+        cls._cache[key] = out
+        return out
 
     _peaks = {}
 
@@ -595,6 +640,148 @@ class Console(tk.Frame):
 
 
 # ---------------------------------------------------------------------------
+class Ears:
+    """Always-on listening for the wake word.
+
+    One microphone stream, held open on a thread. Every phrase it hears is
+    transcribed and thrown away unless it opens with the wake word - and then
+    the rest of that phrase, or the next one, goes into the room exactly as if
+    it had been typed into the console.
+
+    Two things this has to get right. The Bits answer out loud, and a
+    microphone in the same room hears them, so it goes deaf while any of them
+    is speaking. And a phrase heard but not addressed to anyone is dropped
+    without a trace: it is never put in the room log, never shown, never sent.
+    """
+
+    ARMED_FOR = 12.0        # seconds a bare "Bits" waits for the actual line
+    PHRASE_MAX = 14         # seconds of one utterance before it is cut off
+
+    def __init__(self, app):
+        self.app = app
+        self.on = False
+        self.deaf_until = 0.0
+        self._armed_until = 0.0
+        self._complained = False
+
+    def word(self):
+        return (self.app.settings.get("wake_word") or WAKE_WORD).strip() or WAKE_WORD
+
+    # -- running ------------------------------------------------------------
+    def look(self, live):
+        """Show on the mic button whether the room is listening."""
+        try:
+            self.app.root.after(0, lambda: self.app.console.mic.configure(
+                bg=FRAME_GOLD if live else "#3d2f34",
+                fg=INK if live else "#c9bcae"))
+        except Exception:                                         # noqa: BLE001
+            pass
+
+    def start(self):
+        """Open the microphone. False if there's nothing to open it with."""
+        if self.on:
+            return True
+        try:
+            import speech_recognition        # noqa: F401
+        except Exception:                                         # noqa: BLE001
+            self.say("saying \"%s\" needs:  pip install SpeechRecognition pyaudio"
+                     % self.word())
+            return False
+        self.on = True
+        self._complained = False
+        self.look(True)
+        threading.Thread(target=self._work, daemon=True).start()
+        return True
+
+    def stop(self):
+        self.on = False
+        self._armed_until = 0.0
+        self.look(False)
+
+    def arm(self):
+        """Treat the next thing said as the line, without the wake word."""
+        self._armed_until = time.time() + self.ARMED_FOR
+
+    def deafen(self, seconds):
+        """Ignore what is heard for a moment. The Bits come out of the speakers
+        and straight back into the microphone, and a Bit saying the word would
+        otherwise wake the room by itself."""
+        self.deaf_until = max(self.deaf_until, time.time() + seconds)
+
+    # -- the loop -----------------------------------------------------------
+    def _work(self):
+        import speech_recognition as sr
+        r = sr.Recognizer()
+        r.dynamic_energy_threshold = True
+        try:
+            with sr.Microphone() as src:
+                r.adjust_for_ambient_noise(src, duration=0.8)
+                self.say("listening for \"%s\"." % self.word())
+                while self.on:
+                    try:
+                        audio = r.listen(src, timeout=3,
+                                         phrase_time_limit=self.PHRASE_MAX)
+                    except Exception:                             # noqa: BLE001
+                        continue              # silence; that is most of the time
+                    if not self.on:
+                        break
+                    if time.time() < self.deaf_until:
+                        continue              # that was one of ours
+                    try:
+                        heard = r.recognize_google(audio)
+                    except Exception as e:                        # noqa: BLE001
+                        self._recogniser_trouble(e)
+                        continue
+                    self._complained = False
+                    self._heard(heard)
+        except Exception as e:                                    # noqa: BLE001
+            self.say("the microphone wouldn't open (%s)." % e.__class__.__name__)
+        self.on = False
+        self.look(False)
+
+    def _recogniser_trouble(self, e):
+        """Say something the first time, then keep quiet.
+
+        Most failures here are just silence or a cough, which is not worth a
+        word. A real one - no network, no quota - would otherwise be an app
+        that has quietly stopped listening and never says so.
+        """
+        if e.__class__.__name__ == "UnknownValueError" or self._complained:
+            return
+        self._complained = True
+        self.say("couldn't make that out (%s). Still listening."
+                 % e.__class__.__name__)
+
+    def _heard(self, text):
+        woken, rest = wake_split(text, self.word())
+        now = time.time()
+        if not woken:
+            if now < self._armed_until:       # the word came a moment ago
+                self._armed_until = 0.0
+                self.send(text)
+            return                            # not for us; forget it entirely
+        if rest:
+            self._armed_until = 0.0
+            self.send(rest)
+        else:
+            self._armed_until = now + self.ARMED_FOR
+            self.say("...listening.")
+
+    # -- back to the main thread --------------------------------------------
+    def send(self, text):
+        try:
+            self.app.root.after(0, lambda: self.app.user_says(text, to=None))
+        except Exception:                                         # noqa: BLE001
+            self.on = False
+
+    def say(self, text):
+        try:
+            self.app.root.after(0, lambda: self.app.console.room_sys(text))
+        except Exception:                                         # noqa: BLE001
+            self.on = False
+
+
+# ---------------------------------------------------------------------------
 class Party:
     """Up Up Down Down Left Right Left Right B A Enter - and the room dances.
 
@@ -674,6 +861,7 @@ class Party:
             wav, dur = synth_song()
             if app.settings.get("voices", True):
                 app.speaker.play(wav)
+                app.ears.deafen(dur + 0.5)
         except Exception:                                         # noqa: BLE001
             pass
         self.dancing = True
@@ -765,7 +953,6 @@ class App:
         self.room_log = []          # [(speaker, text)]
         self.turn_q = queue.Queue()  # (bit_name, depth, relay)
         self.busy = False
-        self._slot = 0
         self.results = queue.Queue()
         self._pending = {}          # summoned, mid-cast, not yet on screen
         self._quiet_cast = set()    # cast by the Wizard mid-line; he'll say it himself
@@ -778,10 +965,20 @@ class App:
             bits_tools.ON_STAGE = self._stage_request
             bits_tools.STAGE_PRESENT = self.present
             bits_tools.ON_APPROVAL_NEEDED = self._approval_raised
+            bits_tools.ON_FLOOR = self._floor_request
         try:
             self.ambient = bits_ambient.Ambient() if bits_ambient else None
         except Exception:                                         # noqa: BLE001
             self.ambient = None      # watchers are a luxury; never fatal
+        self._polling = False        # a watcher sweep is out on a thread
+        try:
+            self.desk = bits_desk.Desk(
+                on_rule=self._desk_ruled,
+                on_note=lambda t: self.root.after(
+                    0, lambda: self.console.room_sys(t))) if bits_desk else None
+        except Exception:                                         # noqa: BLE001
+            self.desk = None         # a gadget is a luxury; never fatal
+        self._sprite_q = queue.Queue()   # decoded sprites waiting to reach Tk
 
         root.title("The Busy Business Bits")
         root.configure(bg=FRAME_DARK)
@@ -792,6 +989,7 @@ class App:
         self._minimized = False
         root.bind("<Map>", self._on_map)
         self.party = Party(self)
+        self.ears = Ears(self)
         # the code has to be caught wherever the focus is - every card is its
         # own toplevel, and "all" is the only bindtag they share
         root.bind_all("<KeyPress>", self.party.key, add="+")
@@ -810,7 +1008,15 @@ class App:
         self._pump()
         self._ambient_tick()
         self._warm_peaks()
+        self._warm_sprites(HOST)     # he is in the console from the start
+        self._sprite_tick()
+        if self.desk and self.desk.start():
+            self._desk_tick()
         self.party.warm()
+        if self.settings.get("wake", True):
+            # opening the device costs a moment, so keep it clear of the sprite
+            # warm and the first cast rather than adding to them
+            self.root.after(1200, self.ears.start)
         root.protocol("WM_DELETE_WINDOW", self.quit)
 
     # -- summoning ----------------------------------------------------------
@@ -829,25 +1035,8 @@ class App:
             return
         if quiet:
             self._quiet_cast.add(name)
-        n = self._slot
-        self._slot += 1
-        sx, sy = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        step = CARD + 30
-        # start clear of the console so it never gets buried
-        try:
-            self.root.update_idletasks()
-            left = self.root.winfo_x() + self.root.winfo_width() + 24
-        except Exception:
-            left = 660
-        vstep = CARD + 190          # card + its text box + breathing room
-        cols = max(1, (sx - left - 20) // step)
-        rows = max(1, (sy - 60) // vstep)
-        cell = n % (cols * rows)
-        lap = n // (cols * rows)    # after a full grid, cascade diagonally
-        x = left + (cell % cols) * step + lap * 26
-        y = 30 + (cell // cols) * vstep + lap * 26
-        x = min(x, max(20, sx - CARD - 20))
-        y = min(y, max(20, sy - 200))
+        self._warm_sprites(name)    # decoding starts now; the cast buys the time
+        x, y = self._place()
         # The Wizard casts first and the Bit arrives on the BAM at the end of
         # it - so the whole snap and its sparkles play out before anything
         # appears. The arrival is timed off the App rather than the console's
@@ -858,6 +1047,147 @@ class App:
         self.console.room_sys("The Wizard begins the summoning of %s..." % SHORT[name])
         cue = self.console.wizard_flourish(self.sprites.get("The Wizard", {}))
         self.root.after(max(0, cue), lambda: self._land(name))
+
+    def _card_size(self):
+        """What one card actually takes up, measured rather than assumed.
+
+        The frame is CARD square and the text box under it adds whatever its
+        rows and font come to - about 154px at the default 9pt, but that moves
+        with the font and with DPI scaling, and a layout built on the wrong
+        number is exactly how cards end up on top of each other.
+        """
+        for w in self.windows.values():
+            try:
+                w.update_idletasks()
+                cw, ch = w.winfo_width(), w.winfo_height()
+                if cw > 1 and ch > 1:
+                    return cw, ch
+            except Exception:                                     # noqa: BLE001
+                pass
+        return CARD, CARD + 154
+
+    def _occupied(self, cw, ch):
+        """The cards already spoken for: on screen, or still mid-cast."""
+        taken = [(x, y, cw, ch) for x, y in self._pending.values()]
+        for w in self.windows.values():
+            try:
+                taken.append((w.winfo_x(), w.winfo_y(),
+                              w.winfo_width(), w.winfo_height()))
+            except Exception:                                     # noqa: BLE001
+                pass
+        return taken
+
+    def _console_rect(self):
+        if self._minimized:
+            return None
+        try:
+            self.root.update_idletasks()
+            return (self.root.winfo_x(), self.root.winfo_y(),
+                    self.root.winfo_width(), self.root.winfo_height())
+        except Exception:                                         # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _cells(rx, ry, rw, rh, cw, ch, gap):
+        """Top-left corners for a grid of cards laid into one rectangle."""
+        if rw < cw + gap or rh < ch + gap:
+            return
+        for r in range((rh - gap - ch) // (ch + gap) + 1):
+            for c in range((rw - gap - cw) // (cw + gap) + 1):
+                yield rx + gap + c * (cw + gap), ry + gap + r * (ch + gap)
+
+    @staticmethod
+    def _overlap(x, y, cw, ch, taken):
+        """How much of `taken` a card here would cover, in square pixels."""
+        return sum(max(0, min(x + cw, tx + tw) - max(x, tx))
+                   * max(0, min(y + ch, ty + th) - max(y, ty))
+                   for tx, ty, tw, th in taken)
+
+    @staticmethod
+    def _clear_of(x, y, cw, ch, taken):
+        return not any(x < tx + tw and tx < x + cw
+                       and y < ty + th and ty < y + ch
+                       for tx, ty, tw, th in taken)
+
+    def _place(self):
+        """Where the next card goes: the first cell nothing is standing in.
+
+        Beside the console first, then under it, then anywhere in the work
+        area. It used to be a single grid starting at the console's right edge,
+        with the last card clamped to the screen edge - so a console parked
+        anywhere but the top left squeezed that grid to one column and clamped
+        every card in it onto the same coordinate. The cells are checked
+        against what is actually on screen now, which also means a Bit summoned
+        into a gap left by a dismissal takes the gap instead of the next slot
+        along.
+        """
+        gx, gy, aw, ah = self._work_area()
+        cw, ch = self._card_size()
+        gap = CARD_GAP
+        cards = self._occupied(cw, ch)
+        regions = []
+        con = self._console_rect()
+        if con:
+            cx, cy, ckw, ckh = con
+            regions.append((cx + ckw, gy, gx + aw - cx - ckw, ah))   # beside it
+            regions.append((gx, cy + ckh, aw, gy + ah - cy - ckh))   # under it
+        regions.append((gx, gy, aw, ah))                             # anywhere
+        cells = []
+        for rx, ry, rw, rh in regions:
+            for xy in self._cells(max(gx, rx), max(gy, ry), rw, rh, cw, ch, gap):
+                if xy not in cells:
+                    cells.append(xy)
+        # A maximised console covers the screen, and an obstacle that big leaves
+        # nowhere at all - at that size it stops being one.
+        blockers = list(cards)
+        if con and con[2] * con[3] < aw * ah * 0.6:
+            blockers.append(con)
+        for x, y in cells:
+            if self._clear_of(x, y, cw, ch, blockers):
+                return x, y
+        # The tidy grid is full. Its even spacing leaves a sliver at the edges,
+        # so look anywhere before giving up on a clean spot.
+        step = max(32, cw // 6)
+        spot, over = self._scan((gx, gy, aw, ah), cw, ch, blockers, step)
+        if spot and not over:
+            return spot
+        # Nothing clears the console either. Covering it is the lesser evil: it
+        # can be dragged out from under, and a Bit cannot be dragged out from
+        # under another Bit sitting exactly on top of it. Failing even that,
+        # take whatever covers the least - nine cards of this size on a laptop
+        # screen is arithmetic, not a bug, and it should at least be spread.
+        area = (gx, gy, aw, ah)
+        spot, _ = self._scan(area, cw, ch, cards, step, apart=CARD_CORNER)
+        if not spot:            # even that is impossible; take the least bad
+            spot, _ = self._scan(area, cw, ch, cards, step)
+        return spot or (gx + gap, gy + gap)
+
+    @staticmethod
+    def _scan(area, cw, ch, blockers, step, apart=0):
+        """Best card position in `area`: the first that clears `blockers`, or
+        else the one covering least of them. Returns (position, overlap).
+
+        `apart` refuses a position that close to another card's own corner in
+        both axes. When cards have to overlap, that is what leaves the one
+        underneath a corner still showing - enough to see who it is, and enough
+        to get hold of and drag out.
+        """
+        gx, gy, aw, ah = area
+        best, score = None, None
+        y = gy
+        while y + ch <= gy + ah:
+            x = gx
+            while x + cw <= gx + aw:
+                if not (apart and any(abs(x - tx) < apart and abs(y - ty) < apart
+                                      for tx, ty, _, _ in blockers)):
+                    over = App._overlap(x, y, cw, ch, blockers)
+                    if not over:
+                        return (x, y), 0
+                    if score is None or over < score:
+                        best, score = (x, y), over
+                x += step
+            y += step
+        return best, score
 
     def _why_not_summon(self, name):
         """Why `name` can't be cast right now, or "" if it can."""
@@ -894,6 +1224,61 @@ class App:
         return ("%s is arriving on the sparkle. Address them by name in this very "
                 "reply and they'll pick it up as they land." % name)
 
+    def _desk_tick(self):
+        """Tell the desk unit what it should be showing.
+
+        The app asserts the whole state and the module sends only what has
+        changed, so this covers the board being plugged in halfway through an
+        argument as well as it covers the quiet.
+        """
+        try:
+            if self.desk.here():
+                waiting = self._pending_approvals()
+                if waiting:
+                    self.desk.ask(waiting[0])
+                else:
+                    self.desk.clear()
+                    last = next(((w, t) for w, t in reversed(self.room_log)
+                                 if w != "You" and w != "(noticed)"), ("", ""))
+                    self.desk.room([SHORT[n] for n in self.present()],
+                                   SHORT.get(last[0], ""), last[1])
+        except Exception:                                         # noqa: BLE001
+            pass
+        self.root.after(1200, self._desk_tick)
+
+    @staticmethod
+    def _pending_approvals():
+        try:
+            return [i for i in bits_tools._approvals()["items"]
+                    if i["state"] == "pending"]
+        except Exception:                                         # noqa: BLE001
+            return []
+
+    def _desk_ruled(self, approval_id, ok):
+        """A button on the desk unit. Called from its reader thread."""
+        self.root.after(0, lambda: self._desk_rule(approval_id, ok))
+
+    def _desk_rule(self, approval_id, ok):
+        """Settle an approval because a person pressed a button on the desk.
+
+        Straight through the Boss's own two tools, which run directly because
+        he is the gate - the button is standing in for his ruling, not routing
+        around it.
+        """
+        if not bits_tools or not approval_id:
+            return
+        if ok:
+            out = bits_tools.run_tool(BOSS, "approve", {"id": approval_id})
+        else:
+            out = bits_tools.run_tool(BOSS, "refuse",
+                                      {"id": approval_id,
+                                       "reason": "refused at the desk"})
+        first = (out or "").strip().splitlines()
+        self.console.room_sys("at the desk: " + (first[0][:140] if first else "done"))
+        w = self.windows.get(BOSS)
+        if w:
+            w.say_sys("(ruled at the desk)")
+
     def _approval_raised(self, item):
         """A Bit has hit the gate. Fetch the Boss - a ruling can't happen off
         screen, and the Bit shouldn't have to say "ask him when you next see him".
@@ -904,6 +1289,10 @@ class App:
         who = SHORT.get(item.get("bit", ""), item.get("bit", ""))
         line = "%s needs the Boss - %s" % (who, item.get("summary", ""))
         self.root.after(0, lambda: self.console.room_sys(line))
+        if self.desk and self.desk.here():
+            self.desk.ask(item)          # it lights up on the desk immediately
+            return ("It is on the Boss's desk unit - the little screen is "
+                    "lit and waiting for a hand. Say so and stop.")
         if BOSS in self.windows or BOSS in self._pending:
             return "The Boss is here - put it to him by name and he can rule on it."
         why = self._why_not_summon(BOSS)
@@ -941,8 +1330,6 @@ class App:
             w.destroy()
             self.console.set_active(name, False)
             self.console.room_sys("%s dismissed." % SHORT[name])
-        if not self.windows:
-            self._slot = 0
 
     def dismiss_all(self):
         for n in list(self.windows) + list(self._pending):
@@ -994,7 +1381,7 @@ class App:
             # typed into a Bit's own box - there is nothing to work out
             targets, relay = [to], False
         else:
-            targets, relay = route(text, self.reachable(), HOST)
+            targets, relay = route(text, self.reachable(), HOST, MAX_NAMED)
         # every Bit still *hears* the whole room - room_log is what gets sent to
         # the API - but a Bit's window only shows its own thread with you, so
         # only the Bits expected to answer echo your line
@@ -1003,6 +1390,39 @@ class App:
             self._put_to(t, text)
         for t in targets:
             self._enqueue(t, relay=relay)
+        self._drain()
+
+    def _floor_request(self, names, question):
+        """The Wizard opening the floor, called on his worker thread.
+
+        Everyone named gets a turn on the same question and anyone not in the
+        room is summoned, because a Bit with no card has nowhere to say it.
+        """
+        who = [n for n in names if n in BITS and n != HOST]
+        if not who:
+            return "there's nobody to give the floor to."
+        self.root.after(0, lambda: self._open_floor(who, question))
+        return ("the floor is open to %s - they answer one at a time, and any of "
+                "them may pass. Say your piece and stop; don't hand off after this."
+                % ", ".join(SHORT[n] for n in who))
+
+    def _open_floor(self, who, question):
+        """Queue a turn each, on the same question.
+
+        Terminal turns on purpose: the round is already the handoff, and nine
+        Bits each starting a chain of their own is how one question becomes a
+        hundred lines. What they say goes in the room, so each Bit hears the
+        ones before it - which is what makes "don't repeat that" possible.
+        """
+        line = next((t for s, t in reversed(self.room_log) if s == "You"), "")
+        self.console.room_sys("the floor is open: %s"
+                              % (question or line or "over to you"))
+        for name in who:
+            if name in self._queued:        # already holding a turn on this
+                continue
+            self.fetch(name)
+            self._put_to(name, line or question)
+            self._enqueue(name, depth=MAX_CHAIN)
         self._drain()
 
     def _put_to(self, name, text):
@@ -1025,6 +1445,40 @@ class App:
         self.turn_q.put((name, depth, relay))
         self._queued.add(name)
 
+    def _warm_sprites(self, name):
+        """Decode a Bit's states off the main thread, ahead of needing them.
+
+        Every state costs 30-150ms to open, convert and resize, and it used to
+        be paid on the main thread the first time that state played - so a
+        Bit's first word, its first job and the first bar of the party each
+        dropped frames, and with the whole roster out that is forty of them.
+        """
+        paths = list(dict.fromkeys((self.sprites.get(name) or {}).values()))
+
+        def work():
+            for p in paths:
+                try:
+                    if Animator.prepare(p, CARD):
+                        self._sprite_q.put(p)
+                except Exception:                                 # noqa: BLE001
+                    pass                 # a missing sprite is not worth a crash
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _sprite_tick(self):
+        """Hand one prepared sprite to Tk per tick.
+
+        Only Tk's half is left - about 11ms a state - but forty of those in one
+        go is the stutter this is meant to remove, so they go one at a time.
+        """
+        try:
+            Animator.adopt(self._sprite_q.get_nowait(), CARD)
+        except queue.Empty:
+            pass
+        except Exception:                                         # noqa: BLE001
+            pass
+        self.root.after(60, self._sprite_tick)
+
     def _warm_peaks(self):
         """Scan the Wizard's cast for its sparkle peak up front.
 
@@ -1040,23 +1494,54 @@ class App:
     def _ambient_tick(self):
         """Give the watchers a look at the world every few seconds.
 
+        The sweep goes on a thread. A watcher does real work - the clipboard
+        one launches PowerShell, others walk folders - and with the whole
+        roster out every watcher is eligible on every sweep, which put a few
+        hundred milliseconds of it on the main thread every four seconds.
+        Nine cards animating on top of that is a visible stutter: measured at
+        five stalls in twenty seconds, the worst of them 412ms.
+        """
+        try:
+            if (self.ambient and not self.busy and not self._polling
+                    and self.settings.get("ambient", True)
+                    and self.turn_q.empty()):
+                self._polling = True
+                present = self.present()
+                threading.Thread(target=self._ambient_work, args=(present,),
+                                 daemon=True).start()
+        except Exception:                                         # noqa: BLE001
+            self._polling = False
+        self.root.after(4000, self._ambient_tick)
+
+    def _ambient_work(self, present):
+        """One sweep of the watchers, off the main thread."""
+        nudge = None
+        try:
+            nudge = self.ambient.poll(present)
+        except Exception:                                         # noqa: BLE001
+            nudge = None                 # a watcher must never take the app down
+        try:
+            self.root.after(0, lambda: self._ambient_landed(nudge))
+        except Exception:                                         # noqa: BLE001
+            self._polling = False        # the app closed while we were looking
+
+    def _ambient_landed(self, nudge):
+        """Back on the main thread with whatever the sweep found.
+
         A nudge is delivered exactly like a spoken line, so everything
         downstream - the chain limit, the voice, the transcript - works on it
         unchanged. The Bit sees a stage direction rather than a line from you.
         """
-        try:
-            if (self.ambient and not self.busy
-                    and self.settings.get("ambient", True)
-                    and self.turn_q.empty()):
-                n = self.ambient.poll(self.present())
-                if n:
-                    self.room_log.append(("(noticed)", n.text))
-                    self.console.room_sys("%s %s" % (SHORT.get(n.bit, n.bit), n.tag))
-                    self._enqueue(n.bit)
-                    self._drain()
-        except Exception:                                         # noqa: BLE001
-            pass
-        self.root.after(4000, self._ambient_tick)
+        self._polling = False
+        # the room moved on while the sweep was out: a Bit is mid-answer, or
+        # the one who noticed has been dismissed since
+        if (not nudge or self.busy or not self.turn_q.empty()
+                or (nudge.bit not in self.windows and nudge.bit != HOST)):
+            return
+        self.room_log.append(("(noticed)", nudge.text))
+        self.console.room_sys("%s %s" % (SHORT.get(nudge.bit, nudge.bit), nudge.tag))
+        self._enqueue(nudge.bit)
+        self._drain()
 
     def webhook_for(self, name):
         """A Bit's own n8n webhook, or "" if it goes through the shared key."""
@@ -1143,7 +1628,16 @@ class App:
 
     def _deliver(self, name, text, depth, relay=False):
         text = " ".join(text.split())
-        if not text:
+        if is_pass(text):
+            # a Bit deciding it has nothing to add. It stays out of the room log
+            # - a transcript of nine Bits saying nothing is worse than the
+            # silence it's meant to be - but it is shown, or a round of passes
+            # reads as the app having hung.
+            w = self.windows.get(name)
+            if w:
+                w.set_state("idle")
+                w.say_sys("(nothing to add)")
+            self.console.room_sys("%s passes." % SHORT[name])
             self.root.after(120, self._drain)
             return
         self.room_log.append((name, text))
@@ -1153,9 +1647,9 @@ class App:
         self._speak_line(name, text)
 
         # a handoff is only a handoff if it reaches someone, so a Bit naming
-        # another has that one fetched. Only the first name in the line, and
-        # only as deep as MAX_CHAIN, so a Bit reeling off the roster doesn't
-        # fill the desktop with it
+        # others has them fetched. Up to MAX_NAMED of them and only as deep as
+        # MAX_CHAIN: a question with three owners should reach all three, but a
+        # Bit reeling off the roster still shouldn't fill the desktop with it
         # ...but not to someone already holding a turn. "Wizard, get me the
         # Coder" names them both, so the Coder is answering the request already
         # when the Wizard hands it to him - and would otherwise answer twice.
@@ -1164,18 +1658,20 @@ class App:
         # the Wizard as the only Bit who can ever answer the console. What the
         # Bit he hands to says next is chatter again, so the flag stops here.
         nxt = find_addressees(text, self.reachable(), exclude=(name,))
-        if (nxt and depth < MAX_CHAIN and nxt[0] not in self._queued
+        if (nxt and depth < MAX_CHAIN
                 and (relay or self.settings.get("chatter", True))):
-            self.fetch(nxt[0])
-            if relay:
-                # your line has only just found its Bit, so it goes up on their
-                # card too - a transcript that opens with the answer reads as a
-                # Bit muttering to itself
-                you = next((t for who, t in reversed(self.room_log)
-                            if who == "You"), "")
+            # your line has only just found its Bit, so it goes up on their card
+            # too - a transcript that opens with the answer reads as a Bit
+            # muttering to itself
+            you = next((t for who, t in reversed(self.room_log)
+                        if who == "You"), "") if relay else ""
+            for who in nxt[:MAX_NAMED]:
+                if who in self._queued:     # already answering; don't ask twice
+                    continue
+                self.fetch(who)
                 if you:
-                    self._put_to(nxt[0], you)
-            self._enqueue(nxt[0], depth + 1)
+                    self._put_to(who, you)
+                self._enqueue(who, depth + 1)
 
     def _speak_line(self, name, text, to_window=True):
         w = self.windows.get(name) if to_window else None
@@ -1185,6 +1681,8 @@ class App:
             try:
                 wav, dur = synth_voice(text, prof)
                 self.speaker.play(wav)
+                # it comes out of the speakers and back into the microphone
+                self.ears.deafen(dur + 0.5)
             except Exception:
                 dur = 0.0
         if not w:
@@ -1210,6 +1708,11 @@ class App:
 
     # -- voice in -----------------------------------------------------------
     def listen(self):
+        if self.ears.on:
+            # the microphone is already open - clicking is just saying the word
+            self.ears.arm()
+            self.console.room_sys("...listening.")
+            return
         try:
             import speech_recognition as sr
         except ImportError:
@@ -1307,6 +1810,9 @@ class App:
         self.root.geometry("%dx%d+%d+%d" % (w, h, x, y))
 
     def quit(self):
+        if self.desk:
+            self.desk.stop()
+        self.ears.stop()
         self.party.stop()
         self.speaker.stop()
         self.dismiss_all()
@@ -1349,27 +1855,34 @@ class SettingsDialog(tk.Toplevel):
         self.voices = tk.BooleanVar(value=app.settings.get("voices", True))
         self.chatter = tk.BooleanVar(value=app.settings.get("chatter", True))
         self.ambient = tk.BooleanVar(value=app.settings.get("ambient", True))
+        self.wake = tk.BooleanVar(value=app.settings.get("wake", True))
+        word = (app.settings.get("wake_word") or WAKE_WORD)
         for i, (var, label) in enumerate([
             (self.voices, "garbled voices"),
             (self.chatter, "let Bits answer each other"),
             (self.ambient, "let Bits speak up on their own"),
+            (self.wake, 'listen for "%s"' % word),
         ]):
             tk.Checkbutton(self, text=label, variable=var, bg=FRAME_DARK, fg=PAPER,
                            selectcolor=INK, activebackground=FRAME_DARK,
                            activeforeground=PAPER, bd=0, font=("Consolas", 9),
                            highlightthickness=0).grid(row=6 + i, column=0, sticky="w",
                                                       padx=12, pady=2)
+        tk.Label(self, text="   the mic stays open and each phrase is transcribed"
+                            " by Google", bg=FRAME_DARK, fg="#8a7d70",
+                 font=("Consolas", 7, "italic")).grid(row=10, column=0,
+                                                      sticky="w", padx=14)
 
         # --- per-Bit n8n webhooks -------------------------------------------
         tk.Label(self, text="Per-Bit n8n webhooks", bg=FRAME_DARK, fg="#e8d9b8",
-                 font=("Consolas", 9, "bold")).grid(row=9, column=0, sticky="w",
+                 font=("Consolas", 9, "bold")).grid(row=11, column=0, sticky="w",
                                                     padx=14, pady=(12, 0))
         tk.Label(self, text="blank = use the shared API key above",
                  bg=FRAME_DARK, fg="#8a7d70", font=("Consolas", 7, "italic")
-                 ).grid(row=10, column=0, columnspan=2, sticky="w", padx=14)
+                 ).grid(row=12, column=0, columnspan=2, sticky="w", padx=14)
 
         hooks = tk.Frame(self, bg=FRAME_DARK)
-        hooks.grid(row=11, column=0, columnspan=2, sticky="we", padx=14, pady=(4, 0))
+        hooks.grid(row=13, column=0, columnspan=2, sticky="we", padx=14, pady=(4, 0))
         saved = app.settings.get("webhooks") or {}
         self.hooks = {}
         for i, name in enumerate(available_bits(app.sprites)):
@@ -1385,7 +1898,7 @@ class SettingsDialog(tk.Toplevel):
             self.hooks[name] = e
 
         bar = tk.Frame(self, bg=FRAME_DARK)
-        bar.grid(row=12, column=0, columnspan=2, sticky="e", padx=14, pady=12)
+        bar.grid(row=14, column=0, columnspan=2, sticky="e", padx=14, pady=12)
         tk.Button(bar, text="cancel", bg="#3d2f34", fg=PAPER, bd=0, cursor="hand2",
                   font=("Consolas", 9), command=self.destroy).pack(side="left", padx=4, ipadx=8)
         tk.Button(bar, text="save", bg=FRAME_GOLD, fg=INK, bd=0, cursor="hand2",
@@ -1393,7 +1906,7 @@ class SettingsDialog(tk.Toplevel):
 
         self.status = tk.Label(self, text="", bg=FRAME_DARK, fg="#8a7d70",
                                font=("Consolas", 8))
-        self.status.grid(row=13, column=0, columnspan=2, sticky="w", padx=14, pady=(0, 8))
+        self.status.grid(row=15, column=0, columnspan=2, sticky="w", padx=14, pady=(0, 8))
 
     def _fetch(self):
         k = self.key.get().strip()
@@ -1436,8 +1949,14 @@ class SettingsDialog(tk.Toplevel):
         s["voices"] = bool(self.voices.get())
         s["chatter"] = bool(self.chatter.get())
         s["ambient"] = bool(self.ambient.get())
+        s["wake"] = bool(self.wake.get())
         s["webhooks"] = hooks
         save_settings(s)
+        if s["wake"]:
+            self.app.ears.start()
+        else:
+            self.app.ears.stop()
+            self.app.console.room_sys("not listening any more.")
         if hooks:
             self.app.console.room_sys(
                 "on their own webhook: " + ", ".join(SHORT[n] for n in hooks))
@@ -1523,6 +2042,17 @@ def demo_reply(_key, _model, name, room_log, present, _webhook=None,
             if away:
                 return "Begone, %s. Okay... BAM!" % SHORT[who]
             return "Okay... BAM! %s, you're up." % SHORT[who]
+        # Asking the room is the other thing everyone tries, so the demo does
+        # that for real as well. The real Wizard decides this by reading the
+        # line; a canned one can only match the words, and says so by matching
+        # only the obvious ones.
+        if re.search(r"\b(everyone|everybody|all of you|each of you|"
+                     r"you all|the room)\b", said, re.I):
+            if on_tool:
+                on_tool(HOST, "open_floor", {"question": said})
+            out = bits_tools.run_tool(HOST, "open_floor", {"question": said})
+            if "floor is open" in out:
+                return "Gather round, all of you. Speak now or hold your peace."
         # Nobody named, and every unaddressed line comes to him now - so the
         # handoff has to be canned too, or the demo is one Bit saying one quip
         # forever. The real Wizard reads the line and picks; this one has

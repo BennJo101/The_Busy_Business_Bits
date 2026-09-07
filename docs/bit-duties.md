@@ -15,7 +15,7 @@ Every Bit exposes the same four surfaces. A Bit that can't fill one just doesn't
 |---|---|
 | **Ambient** | It watches something and speaks unprompted. The only reason it earns desktop space. |
 | **Drop** | Drag a file, folder, URL or selected text onto its card. Each Bit does one thing with what it's handed. |
-| **Ask** | Type or mic into its box. Natural language, but it resolves to real actions. |
+| **Ask** | Type or mic into its box, or say "Bits" to the room. Natural language, but it resolves to real actions. |
 | **Scope** | What it's pointed at — set by where you put it. See *Placement* below. |
 
 ## Placement — "any device I place them on"
@@ -51,6 +51,11 @@ the numbers.
   gate has the Wizard fetch him, and the queuing Bit is told he's coming, so it puts the
   case to him rather than filing it and hoping. Every other Bit is fetched by being
   named — the Boss is the one fetched by the gate itself.
+- **The desk unit** — with an ESP32-2432S028 plugged into USB, the gate leaves the
+  screen entirely: the little display lights up with the Bit, the verb and the target,
+  and two buttons settle it. A press goes through his own approve/refuse, which
+  run directly because he is the gate - the desk stands in for his ruling rather
+  than routing around it. See *The desk unit* in the README.
 
 ## The Coder — *build*
 
@@ -142,9 +147,14 @@ runs the Bits.
   end-of-day chain and clears the screen.
 - **Install & wire** — dependencies, API keys, n8n webhook URLs, new Bits, new sprites.
   Anything that changes the system rather than using it.
-- **Routing** — an unaddressed request goes to whoever actually owns the verb. He's the
-  fallback when you don't know who to ask, and with nobody on screen he's the one who
-  answers, because he can fetch whoever the request was really for.
+- **Routing** — every unaddressed line comes to him first. The console is his desk, so
+  he reads it and either answers it or hands it to whoever actually owns the verb,
+  fetching them if they aren't on screen. If he can't tell whose it is, it goes to the
+  Boss to rule on. You never have to know who to ask.
+- **The floor** — for a question with no single owner, he puts it to the whole room and
+  every Bit answers in turn, summoned if it isn't there. Each one decides for itself
+  whether to speak: adding nothing is a pass, and a pass is silent. The round is
+  terminal, so nobody in it starts a chain of their own.
 
 ## The Ghost — *remember what you dropped*
 

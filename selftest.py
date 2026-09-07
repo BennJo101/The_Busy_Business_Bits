@@ -164,6 +164,22 @@ def test_sprites():
     check("every Bit has an idle frame", len(have) == 9, sorted(have))
     check("the Wizard has a cast", bool(sp.get("The Wizard", {}).get("snap")))
 
+    # Opening, converting and scaling a state is 85% of what a sprite costs and
+    # has to stay free of Tk, or it can't be done off the main thread and every
+    # first state change drops frames again. Proved by doing one on a thread,
+    # in a process with no Tk root anywhere in it.
+    import threading
+    import busy_business_bits as app
+    path, out = sp["The Boss"]["idle"], []
+    t = threading.Thread(target=lambda: out.append(app.Animator.prepare(path, 64)))
+    t.start()
+    t.join(30)
+    check("a sprite decodes off the main thread", out == [True], out)
+    check("and its frames wait there for Tk", (path, 64) in app.Animator._pil)
+    check("a second pass doesn't decode it twice",
+          app.Animator.prepare(path, 64) is False)
+    app.Animator._pil.pop((path, 64), None)
+
 
 def test_party():
     """The Konami code and the tune it plays."""
@@ -215,8 +231,10 @@ def test_routing():
     t, _ = core.route("Wizard, get me the Coder", everyone, HOST)
     check("naming two reaches both", t == [HOST, "The Coder"], t)
 
-    t, _ = core.route("Boss, Coder, Reaper, all of you", everyone, HOST)
-    check("but never more than two", len(t) == 2, t)
+    t, _ = core.route("Boss, Coder and Reaper - thoughts?", everyone, HOST)
+    check("naming three reaches three", len(t) == 3, t)
+    t, _ = core.route("Boss, Coder, Reaper, Ghost, Courier, all of you", everyone, HOST)
+    check("but a roster read-out is capped", len(t) == 3, t)
 
     # the change: who is on screen no longer decides who answers
     t, _ = core.route("how is it going?", everyone, HOST)
@@ -226,9 +244,157 @@ def test_routing():
     check("a name nobody has falls through to the Wizard", t == [HOST], t)
 
 
+def test_the_floor():
+    """Passing, and putting one question to the whole room."""
+    print("the floor")
+    check("a bare ellipsis is a pass", core.is_pass("..."))
+    check("so is nothing at all", core.is_pass("") and core.is_pass("   "))
+    check("and the word itself", core.is_pass("Pass.") and core.is_pass("nothing to add"))
+    check("a real short answer is not a pass",
+          not core.is_pass("No.") and not core.is_pass("Pass it to the Coder."))
+
+    check("the rules tell them they may pass", '"..."' in core.ROOM_RULES)
+    check("and that naming several brings several",
+          "more than one" in core.ROOM_RULES)
+
+    check("a spoken list of names resolves",
+          tools.resolve_bits("Boss, the Coder and Reaper")
+          == ["The Boss", "The Coder", "The Reaper"],
+          tools.resolve_bits("Boss, the Coder and Reaper"))
+    check("blank means the whole roster",
+          len(tools.resolve_bits("")) == 8, tools.resolve_bits(""))
+    check("the Wizard is never in his own round",
+          "The Wizard" not in tools.resolve_bits("Wizard, Boss"))
+
+    opened = []
+    tools.ON_FLOOR = lambda names, q: (opened.append((names, q))
+                                       or "the floor is open to them.")
+    try:
+        out = tools.run_tool("The Wizard", "open_floor",
+                             {"question": "ship on Friday?", "who": "Boss, Coder"})
+        check("opening the floor reaches the screen",
+              opened == [(["The Boss", "The Coder"], "ship on Friday?")], opened)
+        check("and it isn't gated", "APPROVAL" not in out, out[:60])
+        check("only the Wizard opens it",
+              "isn't your job" in tools.run_tool("The Boss", "open_floor",
+                                                 {"question": "x"}))
+    finally:
+        tools.ON_FLOOR = None
+    check("with no screen wired it says so",
+          tools.NO_STAGE in tools.run_tool("The Wizard", "open_floor",
+                                           {"question": "x"}))
+
+
+def test_layout():
+    """Where a summoned Bit's card is dealt. Geometry only - no screen."""
+    print("layout")
+    import busy_business_bits as app     # imports tkinter, creates nothing
+    A = app.App
+    cw, ch, gap = 260, 414, 16
+
+    cells = list(A._cells(0, 0, 1920, 1040, cw, ch, gap))
+    check("a grid fills the space it is given", len(cells) == 12, len(cells))
+    check("every cell is inside it",
+          all(0 <= x and x + cw <= 1920 and 0 <= y and y + ch <= 1040
+              for x, y in cells))
+    check("and no two cells are the same", len(set(cells)) == len(cells))
+    check("cells never touch",
+          all(abs(a[0] - b[0]) >= cw + gap or abs(a[1] - b[1]) >= ch + gap
+              for i, a in enumerate(cells) for b in cells[i + 1:]))
+    check("a strip too thin for a card yields none",
+          not list(A._cells(0, 0, 200, 1040, cw, ch, gap)))
+
+    card = (100, 100, cw, ch)
+    check("a card on top of another is not clear",
+          not A._clear_of(120, 120, cw, ch, [card]))
+    check("one beside it is", A._clear_of(100 + cw, 100, cw, ch, [card]))
+    check("touching edges don't count as overlap",
+          A._overlap(100 + cw, 100, cw, ch, [card]) == 0)
+    check("and the overlap is measured, not guessed",
+          A._overlap(100 + cw - 10, 100, cw, ch, [card]) == 10 * ch)
+
+    # the case that used to stack them: no room left in the tidy grid
+    spot, over = A._scan((0, 0, 1920, 1040), cw, ch, [card], 40)
+    check("a free spot is found before any overlap", over == 0 and spot, spot)
+    packed = [(x, 0, cw, ch) for x in range(0, 1920, 60)]
+    spot, over = A._scan((0, 0, 1920, 500), cw, ch, packed, 40,
+                         apart=app.CARD_CORNER)
+    check("with nowhere free it still keeps a corner clear",
+          spot is None or all(abs(spot[0] - t[0]) >= app.CARD_CORNER
+                              or abs(spot[1] - t[1]) >= app.CARD_CORNER
+                              for t in packed), spot)
+
+
+def test_wake():
+    """The wake word, without talking at a microphone."""
+    print("the wake word")
+    W = core.wake_split
+    check("the word and a line gives the line",
+          W("Bits, is the repo clean?") == (True, "is the repo clean?"),
+          W("Bits, is the repo clean?"))
+    check("the word alone wakes and asks nothing", W("bits") == (True, ""))
+    check("filler in front of it is ignored",
+          W("hey Bits what does everyone think")
+          == (True, "what does everyone think"))
+    check("so is 'the'", W("the bits") == (True, ""))
+    check("the long way round works too",
+          W("busy business bits, hello") == (True, "hello"))
+    check("a mishearing still wakes it",
+          W("Bit, is the repo clean?") == (True, "is the repo clean?"),
+          "the plural is what gets dropped")
+
+    check("a phrase not addressed to them is not for them",
+          W("the weather is nice") == (False, ""))
+    check("the word has to open the phrase",
+          W("what do the bits think") == (False, ""))
+    check("it is a whole word", W("rabbits are fine") == (False, ""))
+    check("and ordinary English carrying on is not a summons",
+          W("bit of a mess in downloads") == (False, "")
+          and W("beats me") == (False, ""))
+    check("nothing heard is nothing said", W("") == (False, "") and W(None) == (False, ""))
+    check("the word is not hardcoded into the rule",
+          W("oi, boss - what's the number?", word="oi")
+          == (True, "boss - what's the number?"),
+          W("oi, boss - what's the number?", word="oi"))
+
+
+def test_desk():
+    """The desk unit's PC side, with no board plugged in."""
+    print("the desk unit")
+    import bits_desk
+
+    d = bits_desk._detail
+    check("it shows what is actually at stake",
+          d({"args": {"paths": ["a.zip", "b.iso"]}}) == "a.zip, b.iso",
+          d({"args": {"paths": ["a.zip", "b.iso"]}}))
+    check("a long list is counted, not truncated mid-word",
+          d({"args": {"paths": list("abcde")}}) == "a, b, c (+2 more)",
+          d({"args": {"paths": list("abcde")}}))
+    check("a command speaks for itself",
+          d({"args": {"cmd": "rm -rf build"}}) == "rm -rf build")
+    check("and with nothing better it falls back to the summary",
+          d({"args": {}, "summary": "wipe_disk()"}) == "wipe_disk()")
+
+    # the whole point: no board, no pyserial, no difference to the app
+    desk = bits_desk.Desk()
+    check("with no board it is simply not there", desk.here() is False)
+    check("nothing is sent when nothing is listening",
+          desk.clear() is True             # already clear; nothing to say
+          and desk.ask({"id": "A1"}) is False
+          and desk.clear() is False)       # would have sent, but there is no board
+    check("and everything said to it is harmless",
+          desk.room(["Boss"], "Boss", "hello") is None
+          and desk.stop() is None)
+    check("a ruling with nobody listening doesn't raise",
+          desk._line(b'{"t":"rule","id":"A1","ok":true}') is None)
+    check("and neither does junk on the wire",
+          desk._line(b"MicroPython v1.29.0 on 2026-08-24") is None)
+
+
 def main():
     for t in (test_room_rules, test_ask_bit, test_ownership, test_gate,
-              test_summoning, test_sprites, test_routing, test_party):
+              test_summoning, test_sprites, test_routing, test_the_floor,
+              test_layout, test_wake, test_desk, test_party):
         t()
     print()
     if FAILED:
