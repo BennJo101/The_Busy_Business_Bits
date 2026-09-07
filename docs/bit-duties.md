@@ -56,6 +56,9 @@ the numbers.
   and two buttons settle it. A press goes through his own approve/refuse, which
   run directly because he is the gate - the desk stands in for his ruling rather
   than routing around it. See *The desk unit* in the README.
+- **The card** — with an SD card in the board, the desk unit carries the whole
+  project, sprites and all, and hands it to any computer it is plugged into.
+  That is the Courier's verb rather than the Boss's, but it is the Boss's box.
 
 ## The Coder — *build*
 

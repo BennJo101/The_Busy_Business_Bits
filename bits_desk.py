@@ -54,6 +54,7 @@ class Desk:
         self.port = ""
         self.ser = None
         self.on = False
+        self.carrying = 0               # files the board's SD card is holding
         self._last_room = None
         self._last_ask = None
         self._lock = threading.Lock()
@@ -107,6 +108,11 @@ class Desk:
                     if not line:
                         continue
                     if DEVICE.encode() in line:
+                        try:
+                            self.carrying = int(json.loads(line.decode(
+                                "utf-8", "replace")).get("carrying") or 0)
+                        except Exception:                         # noqa: BLE001
+                            self.carrying = 0
                         return s, port
             except Exception:                                     # noqa: BLE001
                 pass
@@ -129,7 +135,12 @@ class Desk:
             # forget what it was showing: it has just booted, and the app
             # will assert the whole state again on its next tick
             self._last_room = self._last_ask = None
-            self.note("the desk is on %s." % port)
+            if self.carrying:
+                self.note("the desk is on %s, carrying the Bits - %d files. "
+                          "desk/carry_bits.py --unload DIR takes them off."
+                          % (port, self.carrying))
+            else:
+                self.note("the desk is on %s." % port)
             try:
                 while self.on:
                     line = s.readline()

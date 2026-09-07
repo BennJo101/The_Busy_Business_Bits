@@ -65,8 +65,34 @@ USER = _user_name()
 HOME = os.path.expanduser("~")
 STATE_DIR = os.path.join(HOME, ".busy_business_bits")
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-REPORTS_DIR = os.path.join(PROJECT_ROOT, "Bit Reports")
-VAULT_ROOT = os.path.dirname(PROJECT_ROOT)          # the Obsidian vault above us
+def _vault_root():
+    """Where the Bits keep their notes.
+
+    Normally the Obsidian vault this project sits inside. But the desk unit
+    carries a vault of its own on its SD card, and a board taken to another
+    machine should bring the Bits' notes with it - so a setting or an
+    environment variable can point them at that one instead.
+    """
+    got = os.environ.get("BITS_VAULT", "").strip()
+    if not got:
+        try:
+            with open(os.path.join(HOME, ".busy_business_bits.json"),
+                      encoding="utf-8") as f:
+                got = (json.load(f).get("vault") or "").strip()
+        except Exception:                                         # noqa: BLE001
+            got = ""
+    return got if got and os.path.isdir(got) else os.path.dirname(PROJECT_ROOT)
+
+
+VAULT_ROOT = _vault_root()
+
+# A Bit that finds forty things writes them to a file and says the verdict out
+# loud. Those land in the vault when the Bits have one of their own - the desk
+# unit's card carries a vault with a Reports folder in it - and beside the
+# project when they don't.
+REPORTS_DIR = (os.path.join(VAULT_ROOT, "Reports")
+               if os.path.isdir(os.path.join(VAULT_ROOT, "Reports"))
+               else os.path.join(PROJECT_ROOT, "Bit Reports"))
 DOWNLOADS = os.path.join(HOME, "Downloads")
 DESKTOP = os.path.join(HOME, "Desktop")
 

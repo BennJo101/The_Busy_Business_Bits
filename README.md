@@ -279,8 +279,11 @@ and works exactly as before when there is no board at all.
 | `desk/tft.py` | ILI9341 driver — no full framebuffer, the board has 160k of RAM |
 | `desk/touch.py` | XPT2046 touch, deliberately coarse |
 | `desk/desk.py` | The two screens and the line protocol |
+| `desk/carrier.py` | The SD card: mounting it, and what it is carrying |
 | `desk/main.py` | Runs it at boot |
 | `desk/flash_desk.py` | Puts it all on the board |
+| `desk/carry_bits.py` | Loads the project and the vault onto the card, and off again |
+| `desk/make_vault.py` | Builds the Bits' vault from the roster |
 
 Setting one up:
 
@@ -292,6 +295,66 @@ python desk/flash_desk.py --micropython ESP32_GENERIC-v1.29.0.bin
 MicroPython goes on once; after that `python desk/flash_desk.py` just copies the
 four files, so changing the screen is a two-second round trip. Ctrl-C on the
 serial port drops to a REPL if you want to poke at it.
+
+### Carrying the Bits on it
+
+Put an SD card in the board and it carries the whole project — sprites and all —
+and hands it to any computer you plug it into.
+
+```
+python desk/carry_bits.py --load          put this project on the card
+python desk/carry_bits.py --unload DIR    copy it off, onto this computer
+python desk/carry_bits.py --list          what the card is holding
+```
+
+The board is not a USB drive; it is an ESP32 on a serial port, so the files go
+through it a chunk at a time at about 8KB/s. A full copy of the project is a few
+minutes, with a progress bar at both ends — the board draws its own, so you can
+watch it fill from across the desk. When it is carrying something, the idle
+screen says so.
+
+`carry_bits.py` needs nothing but `pyserial`, which is the point: the computer
+you are handing the Bits *to* does not have them yet. Settings and state do not
+travel — they live in the user's home directory and belong to the machine, not
+the card.
+
+### Their own vault
+
+The card carries a second thing: an Obsidian vault that is the Bits' own.
+
+```
+python desk/make_vault.py                 build it (nine notes, from the roster)
+python desk/carry_bits.py --load          it goes on the card with the app
+python desk/carry_bits.py --unload DIR --open    off the card, and opened
+```
+
+It is generated from the roster and the tool registry rather than written by
+hand, so a Bit that gains a tool gains a line in its note, and the vault cannot
+quietly drift out of step. `Reports/` is the useful part: any tool that finds
+more than a screenful writes the detail there and the Bit says only the verdict
+out loud — so the vault fills up with the long version of everything they told
+you.
+
+Point them at it with `BITS_VAULT`, or `"vault"` in `~/.busy_business_bits.json`.
+Without one they use the Obsidian vault the project already sits in, exactly as
+before.
+
+**Obsidian itself does not travel.** It is about 290MB, and this link moves
+7KB/s — eleven and a half hours. The vault is 12KB and crosses in seconds, and
+`--open` hands it to whatever Obsidian is on the machine. If you want the app on
+the card as well, put the card in a card reader and copy it across directly;
+through the board is not a realistic route.
+
+Three things about this board that cost an afternoon to find out, in case you
+build on it:
+
+- `machine.SPI(1)` is **VSPI** in this MicroPython build, not HSPI. The card has
+  to be told `slot=2` or it collides with the display and returns
+  `ESP_ERR_INVALID_STATE`.
+- The SD driver will not initialise twice in one boot, so the card is mounted
+  once at startup and kept.
+- That left the touch panel on the bus the card wanted, so touch is bit-banged
+  now. It is read at 1MHz and never noticed.
 
 ## Permissions and the gate
 

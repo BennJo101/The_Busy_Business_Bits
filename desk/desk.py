@@ -19,6 +19,7 @@ import sys
 import time
 from machine import Pin
 
+import carrier
 import tft as T
 import touch as TC
 
@@ -68,6 +69,15 @@ class Desk:
         self.DIM = d.rgb(122, 111, 99)
         self.GREEN = d.rgb(58, 168, 96)
         self.RED = d.rgb(192, 58, 74)
+        # The card is mounted once, here, and kept: the driver will not come
+        # back a second time in one boot, and the screen wants to say what it
+        # is carrying.
+        self.carrying = 0
+        if carrier.mount():
+            try:
+                self.carrying = carrier.total()[0]
+            except Exception:
+                self.carrying = 0
         self.ask = None                 # the approval on screen, if any
         self.room = {"in": [], "who": "", "say": ""}
         self.dirty = True
@@ -113,7 +123,8 @@ class Desk:
         for line in wrap(say, 38)[:5]:
             d.text(line, 8, y, self.PAPER, self.INK)
             y += 14
-        d.text("nothing needs you", 8, T.H - 18, self.DIM, self.INK)
+        d.text("carrying the Bits - %d files" % self.carrying if self.carrying
+               else "nothing needs you", 8, T.H - 18, self.DIM, self.INK)
 
     def draw_ask(self):
         d, a = self.d, self.ask
@@ -144,6 +155,11 @@ class Desk:
         self.lamp(g=ok, r=not ok)
         self.flash_until = time.ticks_add(time.ticks_ms(), 700)
 
+    def hello(self):
+        """Who we are, and what we are carrying - so the app can say so."""
+        return {"t": "hello", "dev": "bits-desk", "v": 1,
+                "carrying": self.carrying}
+
     def send(self, obj):
         print(json.dumps(obj))
 
@@ -164,7 +180,7 @@ class Desk:
                 self.lamp()
                 self.dirty = True
         elif kind == "ping":
-            self.send({"t": "hello", "dev": "bits-desk", "v": 1})
+            self.send(self.hello())
 
     def rule(self, ok):
         a, self.ask = self.ask, None
@@ -175,7 +191,7 @@ class Desk:
         poll = select.poll()
         poll.register(sys.stdin, select.POLLIN)
         buf = ""
-        self.send({"t": "hello", "dev": "bits-desk", "v": 1})
+        self.send(self.hello())
         while True:
             while poll.poll(0):
                 ch = sys.stdin.read(1)

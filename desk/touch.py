@@ -3,7 +3,7 @@
 Deliberately coarse. Nothing on this screen is smaller than a third of it, so
 a rough calibration is all it needs and nobody has to tap crosshairs.
 """
-from machine import Pin, SPI
+from machine import Pin, SoftSPI
 import time
 
 # what the panel reads at the edges - the usual spread for this screen
@@ -16,8 +16,11 @@ class Touch:
         self.w, self.h = w, h
         self.cs = Pin(33, Pin.OUT, value=1)
         self.irq = Pin(36, Pin.IN)
-        self.spi = SPI(2, baudrate=1000000, polarity=0, phase=0,
-                       sck=Pin(25), mosi=Pin(32), miso=Pin(39))
+        # Bit-banged on purpose. The panel is read at 1MHz, which needs no
+        # hardware bus at all, and it leaves VSPI free for the SD card - which
+        # wants that bus on its own pins and cannot share.
+        self.spi = SoftSPI(baudrate=1000000, polarity=0, phase=0,
+                           sck=Pin(25), mosi=Pin(32), miso=Pin(39))
         self.last = 0
 
     def _read(self, cmd):

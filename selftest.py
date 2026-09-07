@@ -391,10 +391,47 @@ def test_desk():
           desk._line(b"MicroPython v1.29.0 on 2026-08-24") is None)
 
 
+def test_vault():
+    """The Bits' own vault: where it is, and what lands in it."""
+    print("the vault")
+    import os
+    import subprocess
+    import sys
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    check("without one they use the vault the project sits in",
+          core.bits_tools.VAULT_ROOT == os.path.dirname(here),
+          core.bits_tools.VAULT_ROOT)
+
+    # BITS_VAULT has to be read at import, so ask a fresh interpreter
+    made = os.path.join(here, "_vault_check")
+    subprocess.run([sys.executable, os.path.join(here, "desk", "make_vault.py"),
+                    "--where", made], capture_output=True, timeout=120)
+    try:
+        check("make_vault builds one note per Bit",
+              len(os.listdir(os.path.join(made, "Bits"))) == len(core.BITS) + 1,
+              sorted(os.listdir(os.path.join(made, "Bits"))))
+        check("and the config that makes it a vault, not a folder",
+              os.path.isfile(os.path.join(made, ".obsidian", "app.json")))
+        env = dict(os.environ, BITS_VAULT=made)
+        got = subprocess.run(
+            [sys.executable, "-c",
+             "import bits_tools as t; print(t.VAULT_ROOT); print(t.REPORTS_DIR)"],
+            cwd=here, env=env, capture_output=True, text=True, timeout=60)
+        lines = got.stdout.strip().splitlines()
+        check("BITS_VAULT points them at the carried one",
+              lines[:1] == [made], got.stdout.strip() or got.stderr[-200:])
+        check("and their reports land inside it",
+              lines[1:2] == [os.path.join(made, "Reports")], lines[1:2])
+    finally:
+        import shutil
+        shutil.rmtree(made, ignore_errors=True)
+
+
 def main():
     for t in (test_room_rules, test_ask_bit, test_ownership, test_gate,
               test_summoning, test_sprites, test_routing, test_the_floor,
-              test_layout, test_wake, test_desk, test_party):
+              test_layout, test_wake, test_desk, test_vault, test_party):
         t()
     print()
     if FAILED:

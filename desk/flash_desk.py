@@ -14,7 +14,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FILES = ("tft.py", "touch.py", "desk.py", "main.py")
+FILES = ("tft.py", "touch.py", "carrier.py", "desk.py", "main.py")
 
 try:
     import serial
@@ -47,6 +47,20 @@ class Board:
         time.sleep(0.2)
         self._raw()
 
+    def _hard_reset(self):
+        """Bring the board back when it has stopped making sense.
+
+        RTS is wired to its reset pin and DTR to the boot pin, which is how
+        esptool restarts it - so there is always a way back from a board left
+        talking at a baud rate nobody remembers choosing.
+        """
+        self.s.dtr = False          # boot normally, not into the bootloader
+        self.s.rts = True           # hold it in reset
+        time.sleep(0.2)
+        self.s.rts = False
+        time.sleep(2.0)
+        self.s.reset_input_buffer()
+
     def _raw(self):
         want = b"raw REPL; CTRL-B to exit\r\n>"
         for attempt in range(5):
@@ -60,6 +74,8 @@ class Board:
                 if want in buf:
                     return
             time.sleep(0.4 + attempt * 0.4)
+            if attempt == 2:        # talking past each other; start it over
+                self._hard_reset()
         raise SystemExit("the board never offered a raw REPL - is it plugged in?")
 
     def run(self, code, timeout=25.0):
