@@ -80,7 +80,14 @@ class Desk:
             except Exception:
                 self.carrying = 0
         self.ask = None                 # the approval on screen, if any
-        self.ap = ""                    # the address, while handing over
+        # Two different things, deliberately. `live` is whether the access
+        # point is broadcasting; `ap` is whether the screen is currently given
+        # over to explaining it. Setting one from the other meant the board
+        # could only offer to hand over while it was showing nothing else -
+        # so the way to set up a new computer was to already know to press a
+        # strip you could not see.
+        self.ap = ""                    # the address, while that screen is up
+        self.ap_live = ""               # the address, whenever it is running
         self.room = {"in": [], "who": "", "say": ""}
         self.dirty = True
         self.flash_until = 0
@@ -131,12 +138,19 @@ class Desk:
         # A tappable strip of its own. The portal has to be reachable from
         # the board alone: the computer it is being handed to has no software
         # to ask for it with, which is the entire problem being solved.
-        d.fill(0, 146, T.W, 26, d.rgb(42, 30, 36))
-        d.text("hand over to a new computer", 8, 152, self.GOLD,
-               d.rgb(42, 30, 36))
-        d.text("carrying %d files" % self.carrying if self.carrying
-               else "nothing needs you", T.W - 8 * 17 - 8, 152, self.DIM,
-               d.rgb(42, 30, 36))
+        strip = d.rgb(42, 30, 36)
+        d.fill(0, 146, T.W, 26, strip)
+        # While the radio is up, the strip names the network instead of
+        # offering to start one. A computer with nothing on it cannot be told
+        # anything, so what it needs to know has to be legible without
+        # pressing anything first.
+        if self.ap_live:
+            d.text("set up a computer: " + P_NAME, 8, 152, self.GOLD, strip)
+        else:
+            d.text("hand over to a new computer", 8, 152, self.GOLD, strip)
+            d.text("carrying %d files" % self.carrying if self.carrying
+                   else "nothing needs you", T.W - 8 * 17 - 8, 152, self.DIM,
+                   strip)
         self.start_button()
 
     def start_button(self, hit=False):
@@ -193,7 +207,7 @@ class Desk:
     def send(self, obj):
         print(json.dumps(obj))
 
-    def portal(self, on=True):
+    def portal(self, on=True, show=True):
         """Become an access point, so a bare computer can be handed the Bits.
 
         The screen carries the instructions, because at this point the computer
@@ -203,18 +217,25 @@ class Desk:
         import portal as P
         if not on:
             P.stop_ap()
-            self.ap = ""
+            self.ap = self.ap_live = ""
+            self.dirty = True
+            return
+        if self.ap_live:                  # already broadcasting; just show it
+            self.ap = self.ap_live if show else ""
             self.dirty = True
             return
         try:
-            self.busy("starting the access point...")
-            self.ap = P.start_ap()
+            if show:
+                self.busy("starting the access point...")
+            self.ap_live = P.start_ap()
             import _thread
             _thread.start_new_thread(P.serve, ())
         except Exception as e:
-            self.ap = ""
-            self.busy("no access point: %r" % e)
+            self.ap = self.ap_live = ""
+            if show:
+                self.busy("no access point: %r" % e)
             return
+        self.ap = self.ap_live if show else ""
         self.dirty = True
 
     def draw_portal(self):
@@ -297,6 +318,14 @@ class Desk:
                        "ask": (self.ask or {}).get("id"),
                        "flash": bool(self.flash_until), "dirty": self.dirty,
                        "carrying": self.carrying, "in": self.room.get("in"),
+                       # whether the access point is up, and whether the
+                       # screen is currently given over to explaining it.
+                       # Without the first, the only way to find out was to
+                       # interrupt the desk and ask the radio - which reboots
+                       # the board, which restarts the access point, so the
+                       # question could not be asked without changing the
+                       # answer.
+                       "ap": self.ap_live, "ap_shown": bool(self.ap),
                        "irq": self.t.irq.value(), "raw": self.t.raw()})
             # deliberately not t.get(): that consumes the press and resets the
             # debounce, so asking what the screen sees would take the press
@@ -314,6 +343,14 @@ class Desk:
         poll.register(sys.stdin, select.POLLIN)
         buf = ""
         self.send(self.hello())
+        # Broadcast from the moment it is powered, without taking the screen.
+        # Setting up a computer is exactly when you cannot ask the board for
+        # anything - it is the case where nothing else is working yet - so the
+        # network has to already be there rather than be summoned first.
+        try:
+            self.portal(True, show=False)
+        except Exception:
+            pass                     # no radio is not a reason not to be a desk
         while True:
             while poll.poll(0):
                 ch = sys.stdin.read(1)
@@ -365,4 +402,12 @@ class Desk:
                     self.send({"t": "start"})
                     self.start_button(True)
                     self.flash_until = time.ticks_add(time.ticks_ms(), 400)
+                    # START only means anything on a computer that already has
+                    # the Bits on it - something has to be listening for it.
+                    # So pressing it settles the question the access point was
+                    # there to answer, and the radio can go down. A power cycle
+                    # brings it back, which is the case that matters: a board
+                    # carried to a machine that has nothing.
+                    if self.ap_live:
+                        self.portal(False)
             time.sleep_ms(20)

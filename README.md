@@ -525,14 +525,26 @@ The board broadcasts its own network, serves the whole bundle over it, and
 takes the machine's WiFi details back so it can carry on afterwards. Nothing
 needs to be installed first, and the card never leaves the board.
 
-1. Press **hand over to a new computer**, the strip just above START. The
-   board brings up an access point called **BusyBusinessBits** and shows the
-   password and address on its screen. Pressing it again stops it.
-2. Join it from the new machine and open <http://192.168.4.1/>.
-3. Take *Download the Bits* — about 35 MB, a minute or so.
-4. Unzip it and run **Install on this computer.bat**.
-5. The same page has a form for the machine's own network, so the board can
+**Nothing needs pressing first.** From the moment it has power the board is
+broadcasting **BusyBusinessBits** (password `okaybam!`), and the strip above
+START says so. That is deliberate: setting up a computer is precisely the case
+where you cannot ask the board for anything, because nothing is working yet —
+so the network has to be there already rather than be summoned by someone who
+would have to know to summon it.
+
+1. Join **BusyBusinessBits** from the new machine and open
+   <http://192.168.4.1/>. Tapping the strip on the board shows the password
+   and address in full, but changes nothing.
+2. Take *Download the Bits* — about 35 MB, a minute or so.
+3. Unzip it and run **Install on this computer.bat**.
+4. The same page has a form for the machine's own network, so the board can
    leave its access point and join that instead.
+
+The radio stands down when **START** is pressed, because START only means
+anything on a machine that already has the Bits listening for it — pressing it
+settles the question the access point existed to ask. A power cycle brings it
+back, which is the case that matters: a board carried to a machine with
+nothing on it.
 
 What arrives is a complete, relocatable CPython with Tkinter, Pillow,
 pyserial, and SpeechRecognition — everything the Bits need, including the wake
