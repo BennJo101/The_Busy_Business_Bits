@@ -353,6 +353,28 @@ relocatable and ships it.
 Obsidian runs from the card with `--user-data-dir` pointed at a folder on the
 card, so its settings travel too and `%APPDATA%` is left alone.
 
+#### Setting the card up
+
+```
+python desk/setup_card.py --drive E: --check           look first
+python desk/setup_card.py --drive E: --bundle PATH     write both copies
+```
+
+It refuses a drive that is not removable, and refuses a filesystem the board
+cannot read, because the one mistake that costs you half the card is silent:
+**format it FAT32, not exFAT**. Windows reads either; MicroPython's SD driver is
+built without exFAT, so an exFAT card mounts on the computer and not on the
+board. Windows will only *create* FAT32 up to 32GB — which is 86x more than the
+371MB this needs, so that limit costs nothing here.
+
+The two copies live side by side and never meet:
+
+| On the card | Read by | What it is |
+|---|---|---|
+| `\BitsPortable\` | a card reader | The whole environment — Python, Obsidian, app, vault |
+| `\BusyBusinessBits\` | the board | The project, for handing over down the serial line |
+| `\BusyBusinessBitsVault\` | the board | The vault, likewise |
+
 ### Their own vault
 
 The card carries a second thing: an Obsidian vault that is the Bits' own.
