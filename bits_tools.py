@@ -224,6 +224,74 @@ def _ps(script, timeout=25):
 
 
 # ----------------------------------------------------------------------------
+# The clipboard, without a process per look.
+#
+# The Coder's watcher checks the clipboard every three seconds, and it used to
+# do it by starting a PowerShell - twelve hundred process launches an hour on a
+# machine whose whole job is to sit quietly in the corner. The clipboard is a
+# pair of calls in user32, so make them.
+#
+# GetClipboardSequenceNumber is the cheap half: it changes only when somebody
+# copies something, so the usual answer costs one call and no clipboard lock at
+# all. Opening the clipboard is the expensive and rude half - it can fail
+# outright, because whichever application copied last may still be holding it.
+# ----------------------------------------------------------------------------
+CF_UNICODETEXT = 13
+_clip_last = [None, None]        # sequence number, and the text it went with
+
+
+def _clip_seq():
+    if not WINDOWS:
+        return None
+    try:
+        import ctypes
+        return int(ctypes.windll.user32.GetClipboardSequenceNumber())
+    except Exception:             # noqa: BLE001
+        return None
+
+
+def _clip_text():
+    """Whatever text is on the clipboard, or None. Never raises."""
+    if not WINDOWS:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+        u32.OpenClipboard.argtypes = [wintypes.HWND]
+        u32.GetClipboardData.restype = wintypes.HANDLE
+        k32.GlobalLock.argtypes = [wintypes.HANDLE]
+        k32.GlobalLock.restype = ctypes.c_void_p
+        # Without this the handle is passed as a C int, and a 64-bit handle
+        # does not fit one: "int too long to convert", raised on the way out
+        # of a read that had already worked.
+        k32.GlobalUnlock.argtypes = [wintypes.HANDLE]
+        # the owner may still have it; a few tries over a fifth of a second is
+        # long enough to be polite and short enough not to stall the watcher
+        for _ in range(5):
+            if u32.OpenClipboard(None):
+                break
+            time.sleep(0.04)
+        else:
+            return None
+        try:
+            handle = u32.GetClipboardData(CF_UNICODETEXT)
+            if not handle:
+                return ""                      # something is on it, not text
+            p = k32.GlobalLock(handle)
+            if not p:
+                return None
+            try:
+                return ctypes.wstring_at(p)
+            finally:
+                k32.GlobalUnlock(handle)
+        finally:
+            u32.CloseClipboard()
+    except Exception:             # noqa: BLE001
+        return None
+
+
+# ----------------------------------------------------------------------------
 # Scope - "any device I place them on"
 #
 # A Bit's working folder is set by where you put it. Drop the Reaper on a folder
@@ -691,9 +759,18 @@ TOOLS["approve"].tier = WRITE
       READ, "The Coder", {}, [])
 def t_clipboard(bit):
     if WINDOWS:
-        rc, out = _ps("Get-Clipboard -Raw", timeout=10)
-        if rc == 0 and out.strip():
-            return out.strip()[:4000]
+        seq = _clip_seq()
+        if seq is not None and seq == _clip_last[0]:
+            text = _clip_last[1]               # nobody has copied since we looked
+        else:
+            text = _clip_text()
+            if text is None:                   # someone else had it locked
+                rc, out = _ps("Get-Clipboard -Raw", timeout=10)
+                text = out if rc == 0 else ""
+            elif seq is not None:
+                _clip_last[0], _clip_last[1] = seq, text
+        if text and text.strip():
+            return text.strip()[:4000]
         return "clipboard is empty or not text."
     rc, out = _run(["xclip", "-o", "-selection", "clipboard"], timeout=10)
     return out.strip()[:4000] if rc == 0 else "no clipboard access on this platform."

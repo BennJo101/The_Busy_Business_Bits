@@ -544,11 +544,41 @@ def test_undo_filing():
         tools._save(tools.FILINGS_PATH, keep)   # leave the real log alone
 
 
+def test_clipboard():
+    print("the clipboard")
+    if not tools.WINDOWS:
+        check("not Windows - nothing to check here", True)
+        return
+    import subprocess
+    import time
+    seq = tools._clip_seq()
+    check("the sequence number is readable", isinstance(seq, int), seq)
+    mark = "bits selftest %d" % time.time()
+    subprocess.run(["powershell", "-NoProfile", "-Command",
+                    "Set-Clipboard -Value '%s'" % mark], capture_output=True)
+    tools._clip_last[0] = None
+    check("what was copied comes back", tools._clip_text() == mark)
+    check("and the tool agrees",
+          tools.run_tool("The Coder", "read_clipboard", {}) == mark)
+    # the whole point of the rewrite: no process per look. A PowerShell is a
+    # quarter of a second, so anything in that range means we are shelling out.
+    t0 = time.time()
+    for _ in range(200):
+        tools.run_tool("The Coder", "read_clipboard", {})
+    each = (time.time() - t0) / 200
+    check("an unchanged clipboard costs almost nothing", each < 0.005,
+          "%.1f ms per look" % (each * 1000))
+    tools._clip_last[0] = None
+    t0 = time.time()
+    tools._clip_text()
+    check("and a real read is still not a process", time.time() - t0 < 0.05)
+
+
 def main():
     for t in (test_room_rules, test_ask_bit, test_ownership, test_gate,
               test_summoning, test_sprites, test_routing, test_the_floor,
               test_layout, test_wake, test_desk, test_vault, test_radios,
-              test_undo_filing, test_party):
+              test_undo_filing, test_clipboard, test_party):
         t()
     print()
     if FAILED:

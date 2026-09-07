@@ -3,6 +3,7 @@
     python desk/carry_bits.py --load          put this project onto the card
     python desk/carry_bits.py --unload DIR    copy the project off, onto this PC
     python desk/carry_bits.py --list          what the card is carrying
+    python desk/carry_bits.py --payload ZIP   put the handover bundle on it
 
 The board is not a USB drive - it is an ESP32 on a serial port - so the files
 go through it a chunk at a time. That is about 8KB/s, which makes a full copy
@@ -32,6 +33,7 @@ PROJECT = os.path.dirname(HERE)
 ROOT = "/sd/BusyBusinessBits"            # the app
 VAULT_ROOT = "/sd/BusyBusinessBitsVault"  # the Bits' own notes, and Obsidian's
 VAULT_LOCAL = os.path.join(os.path.expanduser("~"), "Busy Business Bits Vault")
+PAYLOAD = "/sd/bits.zip"                 # what the board's own web page serves
 CHUNK = 4096          # base64 of this is 5.5KB, and the wire is the
                       # limit - fewer round trips is the only lever
 CH340 = (0x1A86, 0x7523)
@@ -416,6 +418,126 @@ def do_list(b):
             print("      ... and %d more" % (len(v) - 8))
 
 
+def board_sha(b, dest, upto):
+    """The sha256 of the first `upto` bytes of a file on the card.
+
+    Done on the board because the alternative is reading 35MB back down a wire
+    that manages 7.7KB/s. The board reads its own card at about 390KB/s, so
+    this is a minute and a half against two hours.
+    """
+    code = ("try:\n"
+            "    import uhashlib as _h\n"
+            "except ImportError:\n"
+            "    import hashlib as _h\n"
+            "import ubinascii\n"
+            "_x = _h.sha256()\n"
+            "_left = %d\n"
+            "_f = open(%r, 'rb')\n"
+            "while _left > 0:\n"
+            "    _b = _f.read(4096 if _left > 4096 else _left)\n"
+            "    if not _b:\n"
+            "        break\n"
+            "    _left -= len(_b)\n"
+            "    _x.update(_b)\n"
+            "_f.close()\n"
+            "print(ubinascii.hexlify(_x.digest()).decode())" % (upto, dest))
+    return b.run(code, timeout=900).strip()
+
+
+def local_sha(path, upto=None):
+    h = hashlib.sha256()
+    left = os.path.getsize(path) if upto is None else upto
+    with open(path, "rb") as f:
+        while left > 0:
+            block = f.read(65536 if left > 65536 else left)
+            if not block:
+                break
+            left -= len(block)
+            h.update(block)
+    return h.hexdigest()
+
+
+def resume_at(b, dest, local):
+    """How much of the payload the card already holds, of ours.
+
+    Thirty-five megabytes at 7.7KB/s is an hour and a quarter, and "the cable
+    was nudged at minute seventy, start again" is not a recovery story. The
+    card's copy is hashed and compared against the same prefix of ours, so a
+    resume can only ever continue our own file - a different build, or a
+    truncated write, falls back to sending the lot.
+    """
+    size = os.path.getsize(local)
+    try:
+        on_card = int(b.run("import os\n"
+                            "try:\n"
+                            "    print(os.stat(%r)[6])\n"
+                            "except OSError:\n"
+                            "    print(-1)" % dest, timeout=30).strip())
+    except (SystemExit, ValueError):
+        return 0
+    if on_card <= 0 or on_card > size:
+        return 0
+    print("   the card already holds %.1f MB - checking it is ours"
+          % (on_card / 1048576.0))
+    if board_sha(b, dest, on_card) == local_sha(local, on_card):
+        print("   it is: carrying on from there")
+        return on_card
+    print("   it is not - sending the whole thing")
+    return 0
+
+
+def do_payload(b, local, dest=None):
+    """Put the handover payload on the card, resumably, and prove it arrived."""
+    dest = dest or PAYLOAD
+    if not os.path.isfile(local):
+        raise SystemExit("no such file: %s" % local)
+    free = mounted(b)
+    size = os.path.getsize(local)
+    want = size / 1048576.0
+    print("sending %s  %.1f MB, %d MB free on the card"
+          % (os.path.basename(local), want, free))
+    start = resume_at(b, dest, local)
+    if start >= size:
+        print("   already complete")
+    else:
+        b.run("carrier.mkdirs(%r)" % dest.rsplit("/", 1)[0])
+        b.run("import ubinascii")
+        b.run("f = open(%r, %r)" % (dest, "ab" if start else "wb"))
+        sent, t0, since = start, time.time(), 0
+        with open(local, "rb") as fh:
+            fh.seek(start)
+            while True:
+                block = fh.read(CHUNK)
+                if not block:
+                    break
+                b.run("f.write(ubinascii.a2b_base64(%r))"
+                      % base64.b64encode(block).decode(), timeout=60)
+                sent += len(block)
+                since += 1
+                rate = (sent - start) / max(time.time() - t0, 0.001)
+                left = (size - sent) / rate if rate else 0
+                sys.stdout.write("\r  %s %5.1f KB/s  %d min left   "
+                                 % (bar(sent, size), rate / 1024.0, left / 60))
+                sys.stdout.flush()
+                if since >= 40:             # the board's screen, now and then
+                    screen(b, "Loading the Bits", os.path.basename(local),
+                           sent, size)
+                    since = 0
+        b.run("f.close()")
+        print("\r  %s  %.0f min%s"
+              % (bar(size, size), (time.time() - t0) / 60, " " * 30))
+
+    print("   verifying on the board")
+    there, here = board_sha(b, dest, size), local_sha(local)
+    screen(b, "Loading the Bits", "verified" if there == here else "MISMATCH",
+           size, size)
+    if there != here:
+        raise SystemExit("the copy on the card does not match:\n"
+                         "   here  %s\n   card  %s" % (here, there))
+    print("   sha256 matches: %s" % here)
+    print("done. The card can hand this to a computer that has nothing on it.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--load", action="store_true",
@@ -423,6 +545,9 @@ def main():
     ap.add_argument("--unload", metavar="DIR",
                     help="copy them off the card into DIR")
     ap.add_argument("--list", action="store_true", help="what is on the card")
+    ap.add_argument("--payload", metavar="ZIP",
+                    help="put the handover bundle on the card as %s, "
+                         "resuming if a part of it is already there" % PAYLOAD)
     ap.add_argument("--fresh", action="store_true",
                     help="with --load, clear the card's copy first")
     ap.add_argument("--vault", default=VAULT_LOCAL,
@@ -431,8 +556,8 @@ def main():
                     help="with --unload, open the vault in Obsidian afterwards")
     ap.add_argument("--port", default="")
     args = ap.parse_args()
-    if not (args.load or args.unload or args.list):
-        ap.error("say what to do: --load, --unload DIR, or --list")
+    if not (args.load or args.unload or args.list or args.payload):
+        ap.error("say what to do: --load, --unload DIR, --list, or --payload ZIP")
 
     port = args.port or guess_port()
     if not port:
@@ -442,6 +567,8 @@ def main():
     try:
         if args.list:
             do_list(b)
+        elif args.payload:
+            do_payload(b, args.payload)
         elif args.load:
             do_load(b, args.fresh, args.vault)
         else:
