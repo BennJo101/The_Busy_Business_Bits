@@ -319,6 +319,40 @@ you are handing the Bits *to* does not have them yet. Settings and state do not
 travel — they live in the user's home directory and belong to the machine, not
 the card.
 
+### The card as a computer in your pocket
+
+Put the card in a **card reader** rather than the board and it is an ordinary
+drive, at ordinary speed. That is the only way Obsidian can be on it usefully:
+this ESP32 has no USB peripheral — it talks through a CH340 serial bridge — so
+in the *board* the card can never appear to Windows as a drive at all. Through
+the board it is a 7KB/s pipe; in a reader it is a disk.
+
+So the card carries a whole environment, and a computer with nothing on it runs
+the Bits from it:
+
+```
+BitsPortable  Python\            standalone CPython 3.11 with Tkinter   74 MB
+  Obsidian\          a copy of the install, run portably   290 MB
+  App\               the project                              4 MB
+  Vault\             the Bits' notes
+  State\             settings, tasks, index, approvals
+  Start the Bits.bat
+  Open the Vault.bat
+  Demo the Bits.bat
+  Desk unit.bat      waits for START on the board
+```
+
+368MB all in. The `.bat` files use `%~dp0`, so the card works from any drive
+letter, and they set `BITS_HOME` and `BITS_VAULT` at the card — which means the
+API key, the tasks and the notes arrive with the card and **leave with it**,
+rather than being written into a borrowed computer's profile. The usual portable
+Python trap does not bite here: the embeddable distribution omits tkinter and
+the Bits are a Tkinter app, but a `python-build-standalone` runtime is
+relocatable and ships it.
+
+Obsidian runs from the card with `--user-data-dir` pointed at a folder on the
+card, so its settings travel too and `%APPDATA%` is left alone.
+
 ### Their own vault
 
 The card carries a second thing: an Obsidian vault that is the Bits' own.

@@ -63,7 +63,11 @@ USER = _user_name()
 # are the exception: they're useful notes, so they land in the project.
 # ----------------------------------------------------------------------------
 HOME = os.path.expanduser("~")
-STATE_DIR = os.path.join(HOME, ".busy_business_bits")
+# State follows the settings: BITS_HOME moves both, so the portable copy keeps
+# its tasks, index and approvals on the card. HOME itself stays the real one -
+# the Reaper audits the machine you are actually sitting at.
+STATE_DIR = os.path.join((os.environ.get("BITS_HOME") or "").strip() or HOME,
+                         ".busy_business_bits")
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 def _vault_root():
     """Where the Bits keep their notes.

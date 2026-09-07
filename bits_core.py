@@ -54,7 +54,27 @@ GROUND = "#8e974a"
 INK = "#1a1116"
 PAPER = "#d8cfc0"
 
-SETTINGS_PATH = os.path.join(os.path.expanduser("~"), ".busy_business_bits.json")
+def _bits_home():
+    """Where the settings and working state live.
+
+    Normally the user's home directory - deliberately outside the project, so
+    an API key can never ride along in a commit. BITS_HOME moves it, which is
+    what the portable copy on the SD card sets: on a borrowed computer the key
+    should arrive with the card and leave with it, not be left behind in
+    somebody else's profile.
+    """
+    got = (os.environ.get("BITS_HOME") or "").strip()
+    if got:
+        try:
+            os.makedirs(got, exist_ok=True)
+            return got
+        except Exception:                                         # noqa: BLE001
+            pass
+    return os.path.expanduser("~")
+
+
+BITS_HOME = _bits_home()
+SETTINGS_PATH = os.path.join(BITS_HOME, ".busy_business_bits.json")
 API_URL = "https://api.anthropic.com/v1/messages"
 MODELS_URL = "https://api.anthropic.com/v1/models?limit=50"
 API_VERSION = "2023-06-01"

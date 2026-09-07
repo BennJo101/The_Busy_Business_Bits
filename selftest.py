@@ -399,9 +399,16 @@ def test_vault():
     import sys
 
     here = os.path.dirname(os.path.abspath(__file__))
-    check("without one they use the vault the project sits in",
-          core.bits_tools.VAULT_ROOT == os.path.dirname(here),
-          core.bits_tools.VAULT_ROOT)
+    # the portable copy on the card runs with BITS_VAULT set, so this has to
+    # check the rule rather than one of its two answers
+    pointed = (os.environ.get("BITS_VAULT") or "").strip()
+    if pointed:
+        check("BITS_VAULT is where they keep their notes",
+              core.bits_tools.VAULT_ROOT == pointed, core.bits_tools.VAULT_ROOT)
+    else:
+        check("without one they use the vault the project sits in",
+              core.bits_tools.VAULT_ROOT == os.path.dirname(here),
+              core.bits_tools.VAULT_ROOT)
 
     # BITS_VAULT has to be read at import, so ask a fresh interpreter
     made = os.path.join(here, "_vault_check")
