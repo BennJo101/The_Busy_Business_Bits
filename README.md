@@ -40,8 +40,9 @@ no external assets. Point GitHub Pages at the `/docs` folder to publish it.
 | `Demo The Bits.bat` | Canned lines, no API key needed. Try this first. |
 | `Run The Bits.bat` | The real thing. Needs an API key. |
 | `busy_business_bits.py --voices` | Plays every Bit's voice once, for tuning. |
+| `busy_business_bits.py --song` | Plays the party tune once, for tuning. |
 | `python bits_tools.py` | Prints the tool registry: who owns what, and which tools are gated. |
-| `python selftest.py` | Checks the reply path, the gate and the sprites. No API key needed. |
+| `python selftest.py` | Checks the reply path, the gate, the sprites and the party. No API key needed. |
 
 Needs Python 3.8+ and Pillow.
 
@@ -57,6 +58,31 @@ or just ask the Wizard, below.
 Settings are written to `~/.busy_business_bits.json` and working state to
 `~/.busy_business_bits/` — both deliberately outside the project folder, so
 neither an API key nor a task list can end up in a commit.
+
+## Who answers
+
+The console is the Wizard's desk. A line typed into it with no name on it is
+said to **him** — he reads it, and either answers it or hands it to whoever it
+actually belongs to, fetching them if they aren't in the room. If he can't tell
+whose it is, he gives it to the Boss and lets him rule.
+
+```
+You:     something keeps eating my disk
+Wizard:  A hunger in the dark. Reaper, this is yours.
+Reaper:  Fourteen gigabytes in Downloads hasn't moved since March.
+```
+
+Naming a Bit is you doing the routing yourself, and it still reaches them
+directly — as does typing into a Bit's own text box, which is as addressed as it
+gets. Everything else goes through the desk.
+
+It used to fall to whoever happened to be on screen first instead, which made
+the answer depend on summoning order: the same question got the Coder on Monday
+and the Reaper on Tuesday. Handing your line on is *delivery*, not chatter, so
+it happens even with *let Bits answer each other* switched off — what the Bit he
+hands it to says next is chatter again, and that switch still governs it. Your
+line goes up on the receiving Bit's card as it arrives, so its transcript reads
+as a conversation with you rather than opening on an answer to nothing.
 
 ## Summoning
 
@@ -87,8 +113,8 @@ the request off the room and files it. Before this, a handoff to anyone not
 already on screen simply fell on the floor — which quietly broke every routine
 started from an empty desk. Only the first name in a line summons, and only as
 deep as `MAX_CHAIN`, so a Bit reeling off the roster doesn't fill the desktop
-with it. Turn the whole thing off with *let Bits answer each other* in
-settings.
+with it. Turn Bit-to-Bit chatter off with *let Bits answer each other* in
+settings; the Wizard passing you on is delivery and keeps working either way.
 
 This works in `Demo The Bits.bat` too, with no API key — it's the one thing in
 demo mode that actually happens rather than being canned.
@@ -197,6 +223,20 @@ so nobody drones. Pure stdlib synthesis; no audio library.
 - **Reaper** — 86 Hz sine + noise, very slow and dark
 - **Secretary** — 346 Hz sine, high and lilting
 - **Wizard** — 214 Hz saw, heavy vibrato, warbly
+
+## The party
+
+Type **Up Up Down Down Left Right Left Right B A Enter** anywhere in the app and
+everyone stops working: a chiptune plays and every Bit on screen dances, hopping
+and swaying a beat behind the one before it while the Wizard casts in the
+console. It runs about thirteen seconds and then everybody lands back exactly
+where they were standing.
+
+The tune is synthesised the same way the voices are — square lead, triangle
+bass, noise for the kit, written out as notes in `bits_core.py` under
+`PARTY_LEAD` — so there's still no audio file anywhere in the project. It's
+rendered once on a background thread at startup and cached, and it respects the
+**voices** setting: turn those off and the room dances in silence.
 
 ## Giving a Bit its own workflow
 

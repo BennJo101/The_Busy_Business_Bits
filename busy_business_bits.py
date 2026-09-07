@@ -9,6 +9,7 @@ under their frame, and let them talk to each other.
 Requires: Python 3.8+, Pillow.       Run:  python busy_business_bits.py
 """
 
+import math
 import os
 import queue
 import random
@@ -120,10 +121,10 @@ ensure_deps()
 from PIL import Image, ImageSequence, ImageTk  # noqa: E402
 
 from bits_core import (  # noqa: E402
-    BITS, SHORT, FRAME_DARK, FRAME_GOLD, SKY, GROUND, INK, PAPER,
-    ApiError, Speaker, ask_bit, available_bits, discover_sprites,
+    BITS, PARTY_BEAT, SHORT, FRAME_DARK, FRAME_GOLD, SKY, GROUND, INK, PAPER,
+    ApiError, Konami, Speaker, ask_bit, available_bits, discover_sprites,
     find_addressees, list_models, load_settings, pick_default_model,
-    save_settings, synth_voice,
+    route, save_settings, synth_song, synth_voice,
 )
 # already imported (or already failed to import) inside bits_core, so take its
 # copy rather than risk a second, differently-configured module object
@@ -396,6 +397,8 @@ class BitWindow(tk.Toplevel):
 
     # -- input --------------------------------------------------------------
     def _send(self, _evt=None):
+        if _evt is not None and self.app.party.pressed_return():
+            return "break"          # that Enter finished the Konami code
         text = self.entry.get().strip()
         if not text:
             return
@@ -421,6 +424,7 @@ class Console(tk.Frame):
         title = tk.Label(head, text="THE BUSY BUSINESS BITS", bg=FRAME_DARK,
                          fg="#e8d9b8", font=("Consolas", 11, "bold"))
         title.pack(side="left")
+        self.title = title      # the party flashes it on the beat
 
         # minimal chrome - the same pips the Bits' cards use, rightmost first
         self.pips = {}
@@ -529,6 +533,8 @@ class Console(tk.Frame):
         self.status.pack(fill="x", pady=(4, 0))
 
     def _send(self, _evt=None):
+        if _evt is not None and self.app.party.pressed_return():
+            return "break"          # that Enter finished the Konami code
         t = self.entry.get().strip()
         if not t:
             return
@@ -589,6 +595,165 @@ class Console(tk.Frame):
 
 
 # ---------------------------------------------------------------------------
+class Party:
+    """Up Up Down Down Left Right Left Right B A Enter - and the room dances.
+
+    The code is caught on the "all" bindtag, which fires after the widget that
+    has focus has already had the keystroke. That is fine for the arrows, which
+    only move a cursor, but the B and the A land as text in whichever box you
+    were typing in, so they get taken back out; and the Enter would send the
+    line, so the two `_send`s ask here first and stand down if the code just
+    landed.
+    """
+
+    STEP_MS = int(PARTY_BEAT * 1000)     # one move per eighth note
+    HOP = 16                             # how far off the ground a Bit gets
+    SWAY = 11
+    MOVES = ("snap_talk", "talk", "snap", "work")
+
+    def __init__(self, app):
+        self.app = app
+        self.code = Konami()
+        self.dancing = False
+        self._home = {}                  # name -> where it stood before
+        self._root_home = None
+
+    def warm(self):
+        """Render the tune up front. It costs about half a second, and lazily
+        that half second is spent on the main thread with nine windows already
+        bouncing."""
+        threading.Thread(target=self._warm, daemon=True).start()
+
+    @staticmethod
+    def _warm():
+        try:
+            synth_song()
+        except Exception:                                         # noqa: BLE001
+            pass
+
+    # -- the code -----------------------------------------------------------
+    def key(self, e):
+        """Every keystroke in the app, from `bind_all`."""
+        try:
+            verdict = self.code.feed(e.keysym)
+        except Exception:                                         # noqa: BLE001
+            return
+        if verdict == "letter":
+            self._unfeed(e)
+        elif verdict == "go":
+            self.start()
+
+    def pressed_return(self):
+        """Enter, from a text box that binds it before we ever see it.
+
+        True means the code just completed, so the line must not be sent.
+        """
+        if self.code.feed("Return") != "go":
+            return False
+        self.start()
+        return True
+
+    def _unfeed(self, e):
+        """Take the letter back out of the text box it landed in."""
+        w = getattr(e, "widget", None)
+        try:
+            if isinstance(w, tk.Entry):
+                i = w.index("insert")
+                if i > 0 and w.get()[i - 1].lower() == e.keysym.lower():
+                    w.delete(i - 1)
+        except Exception:                                         # noqa: BLE001
+            pass
+
+    # -- the dance ----------------------------------------------------------
+    def start(self):
+        if self.dancing:
+            return
+        app = self.app
+        dur = 12.0
+        try:
+            wav, dur = synth_song()
+            if app.settings.get("voices", True):
+                app.speaker.play(wav)
+        except Exception:                                         # noqa: BLE001
+            pass
+        self.dancing = True
+        self._home = {}
+        self._root_home = None
+        if not app._minimized and not app._restore_geom:
+            try:
+                app.root.update_idletasks()
+                self._root_home = (app.root.winfo_x(), app.root.winfo_y())
+            except Exception:                                     # noqa: BLE001
+                pass
+        who = len(app.windows)
+        app.console.room_sys(
+            "* * *  %s  * * *"
+            % ("everybody dance" if who else "the Wizard dances alone"))
+        self._step(0, max(1, int(dur * 1000 / self.STEP_MS)))
+
+    def _step(self, i, steps):
+        app = self.app
+        if not self.dancing or i >= steps:
+            self._settle()
+            return
+        try:
+            for n, name in enumerate(list(app.windows)):
+                w = app.windows.get(name)
+                if not w or not w.winfo_exists():
+                    continue
+                # a Bit that arrives mid-song joins from wherever it landed
+                x, y = self._home.setdefault(name, (w.winfo_x(), w.winfo_y()))
+                # each card a step behind the last, so the room ripples rather
+                # than jumping as one
+                ph = i + n
+                w.geometry("+%d+%d" % (
+                    x + int(self.SWAY * math.sin(ph * math.pi / 4.0)),
+                    y - (self.HOP if ph % 2 == 0 else 0)))
+                if i % 4 == 0:
+                    w.set_state(self.MOVES[(i // 4 + n) % len(self.MOVES)])
+            if self._root_home:
+                rx, ry = self._root_home
+                app.root.geometry("+%d+%d" % (rx, ry - (0 if i % 2 else 6)))
+            app.console.title.configure(fg=FRAME_GOLD if i % 2 else "#e8d9b8")
+            if i % 24 == 0:         # his cast runs 4.9s; keep him casting
+                app.console.wizard_flourish(app.sprites.get(HOST, {}))
+        except tk.TclError:
+            self.dancing = False
+            return
+        app.root.after(self.STEP_MS, lambda: self._step(i + 1, steps))
+
+    def stop(self):
+        self.dancing = False
+        try:
+            self.app.speaker.stop()
+        except Exception:                                         # noqa: BLE001
+            pass
+
+    def _settle(self):
+        was = self.dancing
+        self.dancing = False
+        for name, home in self._home.items():
+            w = self.app.windows.get(name)
+            if not w:
+                continue
+            try:
+                w.geometry("+%d+%d" % home)
+                w.set_state("idle")
+            except Exception:                                     # noqa: BLE001
+                pass
+        self._home = {}
+        try:
+            if self._root_home:
+                self.app.root.geometry("+%d+%d" % self._root_home)
+            self.app.console.title.configure(fg="#e8d9b8")
+            if was:
+                self.app.console.room_sys("...and back to work.")
+        except Exception:                                         # noqa: BLE001
+            pass
+        self._root_home = None
+
+
+# ---------------------------------------------------------------------------
 class App:
     def __init__(self, root, project_root):
         self.root = root
@@ -598,7 +763,7 @@ class App:
         self.speaker = Speaker()
         self.windows = {}
         self.room_log = []          # [(speaker, text)]
-        self.turn_q = queue.Queue()  # (bit_name, depth)
+        self.turn_q = queue.Queue()  # (bit_name, depth, relay)
         self.busy = False
         self._slot = 0
         self.results = queue.Queue()
@@ -626,6 +791,10 @@ class App:
         self._restore_geom = None
         self._minimized = False
         root.bind("<Map>", self._on_map)
+        self.party = Party(self)
+        # the code has to be caught wherever the focus is - every card is its
+        # own toplevel, and "all" is the only bindtag they share
+        root.bind_all("<KeyPress>", self.party.key, add="+")
         self.console = Console(self, root)
 
         avail = [n for n in available_bits(self.sprites) if n != HOST]
@@ -641,6 +810,7 @@ class App:
         self._pump()
         self._ambient_tick()
         self._warm_peaks()
+        self.party.warm()
         root.protocol("WM_DELETE_WINDOW", self.quit)
 
     # -- summoning ----------------------------------------------------------
@@ -820,39 +990,39 @@ class App:
     def user_says(self, text, to=None):
         self.room_log.append(("You", text))
         self.console.room_line("You", text)
-        present = self.present()
         if to:
-            targets = [to]
+            # typed into a Bit's own box - there is nothing to work out
+            targets, relay = [to], False
         else:
-            # the Wizard answers when you name him. He is the fall-through
-            # only for an empty room, where he's the one who can fetch someone
-            named = find_addressees(text, self.reachable())
-            if named:
-                targets = named[:2]
-            elif present:
-                targets = present[:1]
-            else:
-                # nothing on screen to answer, so it goes to the Wizard - who can
-                # summon whoever the line was really for and hand it straight on
-                targets = [HOST]
+            targets, relay = route(text, self.reachable(), HOST)
         # every Bit still *hears* the whole room - room_log is what gets sent to
         # the API - but a Bit's window only shows its own thread with you, so
         # only the Bits expected to answer echo your line
         for t in targets:
             self.fetch(t)
-            w = self.windows.get(t)
-            if w:
-                w.heard("You", text)
-            elif t != HOST:
-                # summoned by this very line, so there's no card to write on yet
-                # - the question goes up as they land, and they answer it
-                self._on_arrival.setdefault(t, []).append(("You", text))
+            self._put_to(t, text)
         for t in targets:
-            self._enqueue(t)
+            self._enqueue(t, relay=relay)
         self._drain()
 
-    def _enqueue(self, name, depth=0):
-        self.turn_q.put((name, depth))
+    def _put_to(self, name, text):
+        """Your line, onto a Bit's card - or onto the pile waiting for one.
+
+        A Bit summoned by the very line it is meant to answer has no card yet,
+        so the question goes up as it lands. The Wizard has no card at all: the
+        console is his, and it already has your line on it.
+        """
+        w = self.windows.get(name)
+        if w:
+            w.heard("You", text)
+        elif name != HOST:
+            self._on_arrival.setdefault(name, []).append(("You", text))
+
+    def _enqueue(self, name, depth=0, relay=False):
+        """`relay` means this turn is holding a line that has not reached its
+        Bit yet - the front desk taking a message. The handoff at the end of it
+        is the delivery, so it goes through even with chatter switched off."""
+        self.turn_q.put((name, depth, relay))
         self._queued.add(name)
 
     def _warm_peaks(self):
@@ -895,7 +1065,7 @@ class App:
     def _drain(self):
         if self.busy or self.turn_q.empty():
             return
-        name, depth = self.turn_q.get()
+        name, depth, relay = self.turn_q.get()
         self._queued.discard(name)
         w = self.windows.get(name)
         if w is None and name != HOST:
@@ -903,7 +1073,7 @@ class App:
                 # summoned a moment ago and still inside the Wizard's cast. Hold
                 # the turn rather than dropping it - the handoff that comes with
                 # a summoning is the whole point of him being able to summon.
-                self._enqueue(name, depth)
+                self._enqueue(name, depth, relay)
                 self.root.after(200, self._drain)
                 return
             self._drain()
@@ -941,18 +1111,18 @@ class App:
             try:
                 reply = ask_bit(key, model, name, snapshot, present, webhook,
                                 on_tool=note_tool)
-                self.results.put(("ok", name, depth, reply))
+                self.results.put(("ok", name, depth, reply, relay))
             except ApiError as e:
-                self.results.put(("err", name, depth, str(e)))
+                self.results.put(("err", name, depth, str(e), relay))
             except Exception as e:  # noqa: BLE001
-                self.results.put(("err", name, depth, repr(e)))
+                self.results.put(("err", name, depth, repr(e), relay))
 
         threading.Thread(target=work, daemon=True).start()
 
     def _pump(self):
         try:
             while True:
-                kind, name, depth, payload = self.results.get_nowait()
+                kind, name, depth, payload, relay = self.results.get_nowait()
                 self.busy = False
                 self.console.status.configure(text="")
                 w = self.windows.get(name)
@@ -963,7 +1133,7 @@ class App:
                     self.console.room_sys("%s: %s" % (SHORT[name], payload))
                     self.root.after(120, self._drain)
                     continue
-                self._deliver(name, payload, depth)
+                self._deliver(name, payload, depth, relay)
         except queue.Empty:
             if not self.busy and self.turn_q.empty():
                 # the room has settled, so the goodbye that named someone is
@@ -971,7 +1141,7 @@ class App:
                 self._just_dismissed.clear()
         self.root.after(60, self._pump)
 
-    def _deliver(self, name, text, depth):
+    def _deliver(self, name, text, depth, relay=False):
         text = " ".join(text.split())
         if not text:
             self.root.after(120, self._drain)
@@ -989,10 +1159,22 @@ class App:
         # ...but not to someone already holding a turn. "Wizard, get me the
         # Coder" names them both, so the Coder is answering the request already
         # when the Wizard hands it to him - and would otherwise answer twice.
+        # `relay` is the front desk passing your line on, which is delivery
+        # rather than Bit-to-Bit chatter - switching chatter off must not leave
+        # the Wizard as the only Bit who can ever answer the console. What the
+        # Bit he hands to says next is chatter again, so the flag stops here.
         nxt = find_addressees(text, self.reachable(), exclude=(name,))
-        if (nxt and depth < MAX_CHAIN and self.settings.get("chatter", True)
-                and nxt[0] not in self._queued):
+        if (nxt and depth < MAX_CHAIN and nxt[0] not in self._queued
+                and (relay or self.settings.get("chatter", True))):
             self.fetch(nxt[0])
+            if relay:
+                # your line has only just found its Bit, so it goes up on their
+                # card too - a transcript that opens with the answer reads as a
+                # Bit muttering to itself
+                you = next((t for who, t in reversed(self.room_log)
+                            if who == "You"), "")
+                if you:
+                    self._put_to(nxt[0], you)
             self._enqueue(nxt[0], depth + 1)
 
     def _speak_line(self, name, text, to_window=True):
@@ -1125,6 +1307,7 @@ class App:
         self.root.geometry("%dx%d+%d+%d" % (w, h, x, y))
 
     def quit(self):
+        self.party.stop()
         self.speaker.stop()
         self.dismiss_all()
         self.root.destroy()
@@ -1314,7 +1497,7 @@ DEMO_LINES = {
 }
 
 
-def demo_reply(_key, _model, name, room_log, _present, _webhook=None,
+def demo_reply(_key, _model, name, room_log, present, _webhook=None,
                 on_tool=None):
     """Canned lines - except the summoning, which is real even in demo mode.
 
@@ -1340,6 +1523,13 @@ def demo_reply(_key, _model, name, room_log, _present, _webhook=None,
             if away:
                 return "Begone, %s. Okay... BAM!" % SHORT[who]
             return "Okay... BAM! %s, you're up." % SHORT[who]
+        # Nobody named, and every unaddressed line comes to him now - so the
+        # handoff has to be canned too, or the demo is one Bit saying one quip
+        # forever. The real Wizard reads the line and picks; this one has
+        # nothing to read with, so it passes to whoever is already on screen.
+        others = [b for b in (present or []) if b != HOST]
+        if others:
+            return "%s, this one's yours." % SHORT[others[0]]
     pool = DEMO_LINES.get(name) or ["Right."]
     return pool[len([1 for s, _ in room_log if s == name]) % len(pool)]
 
@@ -1359,9 +1549,25 @@ def voice_demo():
         time.sleep(dur + 0.45)
 
 
+def song_demo():
+    """Play the party tune once, for tuning - the sibling of --voices."""
+    import time
+    sp = Speaker()
+    wav, dur = synth_song()
+    if not sp.backend:
+        print("No audio backend found.")
+        return
+    print("the party tune  %.2fs" % dur)
+    sp.play(wav)
+    time.sleep(dur + 0.3)
+
+
 def main():
     if "--voices" in sys.argv:
         voice_demo()
+        return
+    if "--song" in sys.argv:
+        song_demo()
         return
     make_dpi_aware()
     root = tk.Tk()

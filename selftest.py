@@ -165,9 +165,70 @@ def test_sprites():
     check("the Wizard has a cast", bool(sp.get("The Wizard", {}).get("snap")))
 
 
+def test_party():
+    """The Konami code and the tune it plays."""
+    print("the party")
+    k = core.Konami()
+    code = list(core.KONAMI)
+    check("the code is not done until the last key",
+          [k.feed(x) for x in code[:-1]][-1] != "go")
+    check("the last key lands it", k.feed(code[-1]) == "go")
+    check("and it rearms behind itself", k.i == 0)
+
+    k = core.Konami()
+    for x in code[:4] + ["z"] + code:
+        got = k.feed(x)
+    check("a wrong key restarts the sequence", got == "go")
+
+    k = core.Konami()
+    for x in ["Up"] + code:
+        got = k.feed(x)
+    check("a false start is still a start", got == "go", "Up Up Up Down... must work")
+
+    k = core.Konami()
+    check("the letters are flagged, so they can be untyped",
+          [k.feed(x) for x in code].count("letter") == 2)
+    k = core.Konami()
+    check("a shouted code is the same code",
+          [k.feed(x.upper()) for x in code][-1] == "go")
+
+    wav, dur = core.synth_song()
+    check("the tune renders", wav[:4] == b"RIFF" and len(wav) > 100000, len(wav))
+    check("it is a listenable length", 8 < dur < 40, dur)
+    check("rendering it twice is free", core.synth_song()[0] is wav)
+
+
+def test_routing():
+    """Who a line typed into the console goes to."""
+    print("routing")
+    everyone = list(core.BITS)
+    HOST = "The Wizard"
+
+    t, relay = core.route("what happened to my disk space?", everyone, HOST)
+    check("an unaddressed line goes to the Wizard", t == [HOST], t)
+    check("and it is marked as undelivered", relay is True)
+
+    t, relay = core.route("Coder, is the repo clean?", everyone, HOST)
+    check("naming a Bit reaches them directly", t == ["The Coder"], t)
+    check("and that is not a relay", relay is False)
+
+    t, _ = core.route("Wizard, get me the Coder", everyone, HOST)
+    check("naming two reaches both", t == [HOST, "The Coder"], t)
+
+    t, _ = core.route("Boss, Coder, Reaper, all of you", everyone, HOST)
+    check("but never more than two", len(t) == 2, t)
+
+    # the change: who is on screen no longer decides who answers
+    t, _ = core.route("how is it going?", everyone, HOST)
+    check("a crowded room doesn't hijack the line", t == [HOST], t)
+
+    t, _ = core.route("what about the Plumber?", everyone, HOST)
+    check("a name nobody has falls through to the Wizard", t == [HOST], t)
+
+
 def main():
     for t in (test_room_rules, test_ask_bit, test_ownership, test_gate,
-              test_summoning, test_sprites):
+              test_summoning, test_sprites, test_routing, test_party):
         t()
     print()
     if FAILED:

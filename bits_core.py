@@ -173,7 +173,13 @@ BITS = {
             "your domain you summon whoever actually knows. A summoning is a real act and "
             "not a turn of phrase: cast it, then address that Bit by name in the same "
             "reply so they land already holding the job. Never promise a summoning you "
-            "have not actually cast."
+            "have not actually cast. "
+            "You keep the door: anything said in the room with no name on it comes to you "
+            "first, and most of it is not yours. Read it, decide whose it is, and hand it "
+            "over in one short line - do not answer on another Bit's behalf, and do not "
+            "make a ceremony of passing it on. If you genuinely cannot tell whose it is, "
+            "give it to the Boss by name and let him rule. If it is small talk, or about "
+            "the Bits themselves, it is yours: just answer it."
         ),
     },
     "The Ghost": {
@@ -384,6 +390,189 @@ def synth_voice(text, prof, seed=None, max_chars=110):
         w.setframerate(SR)
         w.writeframes(buf.tobytes())
     return out.getvalue(), len(buf) / float(SR)
+
+
+# ----------------------------------------------------------------------------
+# The party  (the Konami code, and a tune built the way the voices are)
+# ----------------------------------------------------------------------------
+KONAMI = ("Up", "Up", "Down", "Down", "Left", "Right", "Left", "Right",
+          "b", "a", "Return")
+
+
+class Konami:
+    """Watches keystrokes for the code. Keysyms in, a verdict out.
+
+    Lives here rather than in the window code so it can be tested without a
+    screen, and so the one place that decides "that was the code" is not also
+    the place that decides what to do about it.
+    """
+
+    def __init__(self, code=KONAMI):
+        # B and b are the same key to us, and so are Up and up
+        self.code = tuple(c.lower() for c in code)
+        self.seen = []
+
+    def feed(self, keysym):
+        """One keystroke. Returns:
+
+            ""       the key is not part of the code
+            "on"     it advanced the sequence
+            "letter" it advanced, and it was one of the two letters - which
+                     have landed in whatever text box has focus and want
+                     taking back out again
+            "go"     that was the last key: dance
+        """
+        self.seen.append(keysym.lower())
+        del self.seen[:-len(self.code)]
+        n = self.i
+        if n == len(self.code):
+            self.seen = []
+            return "go"
+        if not n:
+            return ""
+        return "letter" if len(self.code[n - 1]) == 1 else "on"
+
+    @property
+    def i(self):
+        """How far in the code is, as the longest tail of what has been typed
+        that opens the code.
+
+        Measured rather than counted, because a counter that resets on a wrong
+        key gets a false start wrong: "Up Up Up Down Down..." is still the
+        code, and the third Up has to leave it two keys in, not one.
+        """
+        for n in range(min(len(self.seen), len(self.code)), 0, -1):
+            if tuple(self.seen[-n:]) == self.code[:n]:
+                return n
+        return 0
+
+
+PARTY_BPM = 150
+PARTY_BEAT = 30.0 / PARTY_BPM      # one eighth note, in seconds
+
+# One token per eighth note: a note, "-" for a rest, "~" to hold the note
+# before it. Eight bars, A-minor, four four-eighth cells to the bar pair.
+PARTY_LEAD = (
+    "a4 ~ c5 e5   a5 ~ g5 e5   f5 ~ e5 d5   c5 ~ d5 e5 "
+    "g4 ~ b4 d5   g5 ~ f5 d5   e5 ~ c5 b4   a4 ~ ~ ~ "
+    "a4 ~ c5 e5   a5 ~ g5 e5   f5 ~ e5 d5   c5 ~ d5 e5 "
+    "c5 e5 g5 a5  g5 e5 c5 d5  e5 ~ d5 c5   a4 ~ ~ ~ "
+)
+# one root per four eighths, under the cells above
+PARTY_BASS = "a2 f2 g2 a2  e2 c3 a2 a2  a2 f2 g2 a2  c3 g2 a2 a2"
+
+_SEMITONE = {"c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11}
+_SONG = None
+
+
+def _note_hz(tok):
+    """"a4" -> 440.0. Anything unreadable is a rest."""
+    m = re.match(r"^([a-g])([#b]?)([0-8])$", tok)
+    if not m:
+        return 0.0
+    step = _SEMITONE[m.group(1)] + {"#": 1, "b": -1}.get(m.group(2), 0)
+    midi = step + (int(m.group(3)) + 1) * 12
+    return 440.0 * (2.0 ** ((midi - 69) / 12.0))
+
+
+def _read_line(text):
+    """Tokens to [(hz, eighths)], with "~" lengthening the note before it."""
+    out = []
+    for tok in text.split():
+        if tok == "~" and out:
+            out[-1] = (out[-1][0], out[-1][1] + 1)
+        else:
+            out.append((0.0 if tok == "-" else _note_hz(tok), 1))
+    return out
+
+
+def _lay(buf, at, n, freq, kind, amp, rng, hold=0.72, glide=0.0):
+    """Mix one note into `buf`.
+
+    `hold` leaves a gap before the next note so a run of the same pitch reads
+    as separate notes; `glide` bends the pitch down across the note, which is
+    the whole of the kick drum.
+    """
+    n = int(n * hold)
+    if n <= 2 or at >= len(buf):
+        return
+    atk = max(1, int(n * 0.02))
+    rel = max(2, int(n * 0.30))
+    phase = 0.0
+    for i in range(n):
+        j = at + i
+        if j >= len(buf):
+            break
+        phase += freq * (1.0 - glide * i / n) / SR
+        s = _wave_sample(kind, phase, rng)
+        if i < atk:
+            env = i / atk
+        elif i > n - rel:
+            env = (n - i) / rel
+        else:
+            env = 1.0
+        buf[j] += s * env * amp
+
+
+def synth_song():
+    """The party tune. Returns (WAV bytes, seconds).
+
+    Same synthesis as the voices - square lead, triangle bass, noise for the
+    kit - so there is still no audio file anywhere in the project and nothing
+    to ship. It costs about a second to render, so it is cached and warmed on
+    a thread at startup; the code gets typed more than once.
+    """
+    global _SONG
+    if _SONG is not None:
+        return _SONG
+
+    rng = random.Random(1985)
+    lead = _read_line(PARTY_LEAD)
+    eighths = sum(n for _, n in lead)
+    spe = SR * PARTY_BEAT                       # samples per eighth
+    buf = [0.0] * (int(eighths * spe) + int(SR * 0.5))
+
+    at = 0.0
+    for hz, n in lead:
+        if hz:
+            _lay(buf, int(at), n * spe, hz, "square", 0.26, rng)
+            # a second square a whisker sharp: the chip-music way to make one
+            # voice sound like a chorus of them
+            _lay(buf, int(at), n * spe, hz * 1.004, "square", 0.13, rng)
+        at += n * spe
+
+    for k, tok in enumerate(PARTY_BASS.split()):
+        hz = _note_hz(tok)
+        for step, mult in enumerate((1.0, 2.0, 1.0, 1.5)):    # root, octave, root, fifth
+            _lay(buf, int((k * 4 + step) * spe), spe, hz * mult, "tri", 0.30,
+                 rng, hold=0.9)
+
+    for i in range(eighths):
+        at = int(i * spe)
+        if i % 4 == 0:
+            _lay(buf, at, spe, 150.0, "sine", 0.55, rng, hold=0.75, glide=0.62)
+        if i % 8 == 4:
+            _lay(buf, at, spe * 0.55, 1.0, "noise", 0.20, rng)
+        if i % 2 == 1:
+            _lay(buf, at, spe * 0.28, 1.0, "noise", 0.07, rng)
+
+    tail = int(SR * 0.25)
+    out = array("h")
+    for i, s in enumerate(buf):
+        if i > len(buf) - tail:                  # fade the ring-out, no click
+            s *= (len(buf) - i) / tail
+        # soft clip: the voices only ever have one note at a time, this has four
+        s = math.tanh(s * 1.25)
+        out.append(int(max(-1.0, min(1.0, s)) * 27000))
+
+    bio = io.BytesIO()
+    with wave.open(bio, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SR)
+        w.writeframes(out.tobytes())
+    _SONG = (bio.getvalue(), len(out) / float(SR))
+    return _SONG
 
 
 # ----------------------------------------------------------------------------
@@ -773,6 +962,26 @@ def find_addressees(text, candidates, exclude=()):
                 break
     hits.sort()
     return [n for _, n in hits]
+
+
+def route(text, reachable, host):
+    """Who a line typed into the console is for. Returns (targets, relay).
+
+    The console is the Wizard's desk, so a line typed into it is said to him
+    unless you have named someone yourself. It used to fall to whoever happened
+    to be on screen first, which made the answer depend on summoning order:
+    the same question got the Coder on Monday and the Reaper on Tuesday.
+
+    Naming a Bit is you doing the routing, and it still reaches them directly.
+    Naming nobody is the Wizard's job - he reads it, and either answers it or
+    hands it to whoever it actually belongs to, fetching them if they are not
+    in the room. That is what `relay` says: this line has not reached its Bit
+    yet, so the handoff at the end of it is delivery rather than chatter.
+    """
+    named = find_addressees(text, reachable)
+    if named:
+        return named[:2], False
+    return [host], True
 
 
 def strip_leading_address(text, name):
