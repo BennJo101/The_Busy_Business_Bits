@@ -1273,18 +1273,59 @@ class App:
         self.root.after(0, self._wake_console)
 
     def _wake_console(self):
-        """Put the Wizard in front of you, wherever the window had got to."""
+        """Put the Wizard in front of you, wherever the window had got to.
+
+        The obvious lift() and -topmost are not enough. Windows only lets the
+        process that already owns the foreground hand it over, so a window
+        raised on behalf of a button on a desk unit comes back *behind* what
+        you were doing - which reads as the button not working, and gets
+        pressed again. The push below is the documented way round it, and it
+        happens before anything cosmetic so the window is there immediately.
+        """
         try:
-            # deiconify is enough even when it is minimised: the <Map> that
-            # follows is what gives the borderless frame back. minimize() does
-            # not toggle, so calling it here would put it away again.
             self.root.deiconify()
             self.root.lift()
             self.root.attributes("-topmost", True)
-            self.root.after(400, lambda: self.root.attributes("-topmost", False))
+            self._to_the_front()
+            self.root.after(500, lambda: self.root.attributes("-topmost", False))
             self.console.entry.focus_force()
+        except Exception:                                         # noqa: BLE001
+            pass
+        # the flourish and the line are for the look of it: after the raise,
+        # never before, so nothing cosmetic sits between you and the window
+        try:
             self.console.wizard_flourish(self.sprites.get(HOST, {}))
             self.console.room_sys("summoned from the desk unit.")
+        except Exception:                                         # noqa: BLE001
+            pass
+
+    def _to_the_front(self):
+        """Take the foreground, which Windows does not simply give away.
+
+        Attaching to the thread that currently owns it makes us eligible; the
+        stray ALT is the long-standing trick that lifts the foreground lock.
+        Every step is best-effort - on anything but Windows this does nothing
+        and the plain lift above stands.
+        """
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) \
+                or self.root.winfo_id()
+            user32.ShowWindow(hwnd, 9)                 # SW_RESTORE
+            fg = user32.GetForegroundWindow()
+            here = ctypes.windll.kernel32.GetCurrentThreadId()
+            theirs = user32.GetWindowThreadProcessId(fg, None)
+            if theirs and theirs != here:
+                user32.AttachThreadInput(theirs, here, True)
+            user32.keybd_event(0x12, 0, 0, 0)          # ALT down
+            user32.keybd_event(0x12, 0, 2, 0)          # ALT up
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+            if theirs and theirs != here:
+                user32.AttachThreadInput(theirs, here, False)
         except Exception:                                         # noqa: BLE001
             pass
 

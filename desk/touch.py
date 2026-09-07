@@ -47,7 +47,7 @@ class Touch:
             return None
         return x, y
 
-    def get(self, debounce_ms=350):
+    def get(self, debounce_ms=180):
         """A screen position, once per press. None the rest of the time."""
         r = self.raw()
         if not r:

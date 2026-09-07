@@ -14,8 +14,8 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FILES = ("tft.py", "touch.py", "carrier.py", "radio.py", "desk.py",
-         "main.py")
+FILES = ("tft.py", "touch.py", "carrier.py", "radio.py", "netserve.py",
+         "desk.py", "main.py")
 
 try:
     import serial

@@ -62,15 +62,22 @@ def status():
             "rssi": w.status("rssi") if w.isconnected() else None}
 
 
-def secured(ssid):
-    """The security on a network by that name, or "" if it isn't in earshot."""
+def heard(ssid):
+    """The network by that name as the board actually heard it.
+
+    Matched without case: an SSID is case sensitive on the wire, but a person
+    typing "Pretty Fly For A WiFi" for a network called "...Wifi" has not made
+    a meaningful mistake, and joining with the spelling off the scan works.
+    """
+    want = str(ssid).strip().lower()
     try:
-        for net in scan(40):
-            if net["ssid"] == ssid:
-                return net["security"]
+        nets = scan(40)
     except Exception:
-        pass
-    return ""
+        return None
+    for net in nets:
+        if net["ssid"].lower() == want:
+            return net
+    return None
 
 
 def connect(ssid, password="", seconds=18):
@@ -95,10 +102,14 @@ def connect(ssid, password="", seconds=18):
                          % (e.args[0] if e.args else repr(e))}
     # only now is a scan worth believing - a station left mid-connect from a
     # previous attempt hears nothing at all
-    how = secured(ssid)
-    if not how:
+    net = heard(ssid)
+    if not net:
+        near = ", ".join(n["ssid"] for n in (scan(6) or [])[:4])
         return {"on": True, "connected": False,
-                "error": "the board can't hear a network called %s" % ssid}
+                "error": "the board can't hear a network called %s. It can hear: %s"
+                         % (ssid, near or "nothing at all")}
+    ssid = net["ssid"]                    # the spelling it actually heard
+    how = net["security"]
     if how != "open" and not password:
         return {"on": True, "connected": False,
                 "error": "%s is %s and no password was given" % (ssid, how)}

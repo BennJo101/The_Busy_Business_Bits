@@ -301,17 +301,19 @@ def watch():
         sys.exit("busy_business_bits.py isn't next to this file.")
 
     pressed = threading.Event()
-    desk = Desk(on_start=pressed.set, on_note=lambda t: print(t))
+    desk = Desk(on_start=pressed.set,
+                on_note=lambda t: print(t, flush=True))
     if not desk.start():
         sys.exit("this needs pyserial:  pip install pyserial")
-    print("waiting for START on the desk unit. Ctrl-C to give up.")
+    print("waiting for START on the desk unit. Ctrl-C to give up.",
+          flush=True)
     try:
         while not pressed.wait(0.5):
             pass
     except KeyboardInterrupt:
         desk.stop()
         return
-    print("starting the Bits...")
+    print("starting the Bits...", flush=True)
     desk.stop()
     time.sleep(0.8)                 # let the port go before the app wants it
     subprocess.Popen([sys.executable, app], cwd=here)

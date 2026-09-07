@@ -292,20 +292,23 @@ class Desk:
                 if p != self.pulse:
                     self.pulse = p
                     self.lamp(r=bool(p), g=bool(p))
-            if self.dirty:
-                self.draw()
+            # The panel is read before the redraw, not after. A full idle
+            # redraw is 195ms, and a tap that landed inside one was simply
+            # missed - which is why START seemed to need pressing twice.
             self.ticks += 1
             hit = self.t.get()
+            if self.dirty:
+                self.draw()
             if hit and not self.flash_until:
                 if self.ask and hit[1] > 145:
                     self.rule(hit[0] > 160)
                 elif not self.ask and hit[1] > 60:
                     # anything below the header. There is nothing else to press
                     # on this screen, and a resistive panel read through a
-                    # rough calibration lands lower than the bar is drawn - so
-                    # a tap on the START bar was missing a threshold set to
-                    # where the bar actually is.
-                    self.start_button(True)
+                    # rough calibration lands lower than the bar is drawn.
+                    # Sent before the button is drawn: the computer should hear
+                    # about it first, the highlight can wait 28ms.
                     self.send({"t": "start"})
-                    self.flash_until = time.ticks_add(time.ticks_ms(), 500)
+                    self.start_button(True)
+                    self.flash_until = time.ticks_add(time.ticks_ms(), 400)
             time.sleep_ms(20)
