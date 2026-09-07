@@ -144,6 +144,8 @@ class Desk:
         self.dirty = True
         self.flash_until = 0
         self.pulse = 0
+        self._ip = ""          # the address on a real network, cached
+        self._ip_at = 0
         self.ticks = 0          # main-loop counter, so a stall is visible
 
     def lamp(self, r=False, g=False, b=False):
@@ -153,6 +155,24 @@ class Desk:
 
     def colour_of(self, name):
         return self.d.rgb(*PALETTE.get(name, (200, 190, 175)))
+
+    def station_ip(self):
+        """The board's address on a real network, once it has joined one.
+
+        Cached for a few seconds: this is read while drawing, and the screen
+        redraws on every message that arrives.
+        """
+        now = time.ticks_ms()
+        if self._ip_at and time.ticks_diff(now, self._ip_at) < 5000:
+            return self._ip
+        self._ip_at = now
+        try:
+            import network
+            w = network.WLAN(network.STA_IF)
+            self._ip = w.ifconfig()[0] if w.active() and w.isconnected() else ""
+        except Exception:
+            self._ip = ""
+        return self._ip
 
     def draw(self):
         self.dirty = False
@@ -255,26 +275,30 @@ class Desk:
         # the board alone: the computer it is being handed to has no software
         # to ask for it with, which is the entire problem being solved.
         strip = d.rgb(42, 30, 36)
-        d.fill(0, 146, T.W, 26, strip)
-        # While the radio is up, the strip names the network instead of
-        # offering to start one. A computer with nothing on it cannot be told
-        # anything, so what it needs to know has to be legible without
-        # pressing anything first.
+        d.fill(0, 140, T.W, 32, strip)
+        # Two lines, because what a bare computer needs is a network to join
+        # and an address to open, and neither is any use without the other.
+        # It has to be legible without pressing anything: the machine being
+        # set up has no way of being told any of this.
         if self.ap_live:
-            d.text(("set up a computer: " + P_NAME)[:COLS], 8, 152,
+            d.text(("SSID: " + P_NAME)[:COLS], 8, 143, self.GOLD, strip)
+            d.text(("Webpage: " + self.ap_live)[:COLS], 8, 157,
+                   self.PAPER, strip)
+        elif self.station_ip():
+            # set up, and on a real network: the address it can be reached at
+            d.text(("IP: " + self.station_ip())[:COLS], 8, 150,
                    self.GOLD, strip)
         else:
-            # Both ends of the strip, and they must not meet in the middle.
-            # The right-hand label used to be placed as though it were always
-            # seventeen characters wide, so a longer one started before the
+            # Both ends of one line, and they must not meet in the middle. The
+            # right-hand label used to be placed as though it were always
+            # seventeen characters wide, so a longer one began before the
             # left-hand one had finished and overwrote its tail: "hand over to
             # a new cocarrying101 files".
             right = ("%d files" % self.carrying) if self.carrying else ""
-            room = COLS - (len(right) + 1 if right else 0)
-            d.text("hand over to a new computer"[:room], 8, 152,
-                   self.GOLD, strip)
+            left, right = fits("hand over to a new computer", right)
+            d.text(left, 8, 150, self.GOLD, strip)
             if right:
-                d.text(right, T.W - 8 * len(right) - 8, 152, self.DIM, strip)
+                d.text(right, T.W - 8 * len(right) - 8, 150, self.DIM, strip)
         self.start_button()
 
     def start_button(self, hit=False):
