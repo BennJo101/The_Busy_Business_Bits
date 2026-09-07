@@ -88,6 +88,12 @@ class Desk:
         # strip you could not see.
         self.ap = ""                    # the address, while that screen is up
         self.ap_live = ""               # the address, whenever it is running
+        # The room as it has actually gone, not just its last line. The idle
+        # screen has room for five lines of one speaker, which is enough to
+        # see that something was said and not enough to read it.
+        self.log = []                   # (who, said), oldest first
+        self.chat = False               # the transcript, full screen
+        self.top = 0                    # first line shown, while it is open
         self.room = {"in": [], "who": "", "say": ""}
         self.dirty = True
         self.flash_until = 0
@@ -108,12 +114,56 @@ class Desk:
             self.draw_portal()
         elif self.ask:
             self.draw_ask()
+        elif self.chat:
+            self.draw_chat()
         else:
             self.draw_idle()
 
     def header(self, text, colour, ink):
         self.d.fill(0, 0, T.W, 26, colour)
         self.d.text(text[:26], 8, 9, ink, colour)
+
+    ROWS = 13                 # lines of transcript that fit between the bars
+
+    def lines(self):
+        """The whole room, flattened to drawable lines.
+
+        Each is (text, who) - who is "" for a continuation, so a speaker's
+        name keeps its colour and the words stay readable.
+        """
+        out = []
+        for who, said in self.log:
+            out.append((who + ":", who))
+            for line in wrap(said, 38):
+                out.append((line, ""))
+        return out
+
+    def draw_chat(self):
+        """The room, full screen, scrolled."""
+        d = self.d
+        d.clear(self.INK)
+        rows = self.lines()
+        self.header("THE ROOM  (%d-%d of %d)"
+                    % (min(self.top + 1, len(rows)),
+                       min(self.top + self.ROWS, len(rows)), len(rows)),
+                    self.DARK, self.GOLD)
+        if not rows:
+            d.text("nothing has been said yet.", 8, 100, self.DIM, self.INK)
+        y = 34
+        for text, who in rows[self.top:self.top + self.ROWS]:
+            d.text(text, 8, y, self.colour_of(who) if who else self.PAPER,
+                   self.INK)
+            y += 14
+        bar = d.rgb(42, 30, 36)
+        d.fill(0, 208, T.W, 32, bar)
+        third = T.W // 3
+        at_top, at_end = self.top <= 0, self.top + self.ROWS >= len(rows)
+        d.text("up", 34, 218, self.DIM if at_top else self.GOLD, bar)
+        d.text("close", third + 26, 218, self.GOLD, bar)
+        d.text("down", 2 * third + 22, 218,
+               self.DIM if at_end else self.GOLD, bar)
+        d.fill(third, 208, 1, 32, self.INK)
+        d.fill(2 * third, 208, 1, 32, self.INK)
 
     def draw_idle(self):
         d = self.d
@@ -131,8 +181,13 @@ class Desk:
         who, say = self.room.get("who") or "", self.room.get("say") or ""
         if who:
             d.text(who + ":", 8, 96, self.colour_of(who), self.INK)
+            if self.log:
+                # say so, because a region that does something when pressed
+                # and looks exactly like one that does not is not a control
+                note = "tap to read (%d)" % len(self.log)
+                d.text(note, T.W - 8 * len(note) - 8, 96, self.DIM, self.INK)
         y = 116
-        for line in wrap(say, 38)[:5]:
+        for line in wrap(say, 38)[:2]:
             d.text(line, 8, y, self.PAPER, self.INK)
             y += 14
         # A tappable strip of its own. The portal has to be reachable from
@@ -295,6 +350,15 @@ class Desk:
         if kind == "room":
             self.room = {"in": msg.get("in") or [], "who": msg.get("who") or "",
                          "say": msg.get("say") or ""}
+            who, say = self.room["who"], self.room["say"]
+            if who and say and (not self.log or self.log[-1] != (who, say)):
+                self.log.append((who, say))
+                # 40 turns is a few screens to scroll back through and about
+                # six kilobytes. The board has a hundred and thirty free, and
+                # a transcript is not what it should spend them on.
+                del self.log[:-40]
+                if self.chat and self.top >= len(self.lines()) - 1:
+                    self.top = max(0, len(self.lines()) - self.ROWS)
             if not self.ask:
                 self.dirty = True
         elif kind == "ask":
@@ -326,10 +390,20 @@ class Desk:
                        # question could not be asked without changing the
                        # answer.
                        "ap": self.ap_live, "ap_shown": bool(self.ap),
+                       "chat": bool(self.chat), "top": self.top,
+                       "said": len(self.log),
                        "irq": self.t.irq.value(), "raw": self.t.raw()})
             # deliberately not t.get(): that consumes the press and resets the
             # debounce, so asking what the screen sees would take the press
             # away from the loop that acts on it
+        elif kind == "tap":
+            # A press, sent down the wire. The screen has no other way of
+            # being exercised without a thumb, and "does the transcript
+            # scroll" is not a question worth answering by hand every time.
+            try:
+                self.press(int(msg.get("x", 0)), int(msg.get("y", 0)))
+            except Exception:
+                pass
         elif kind == "ping":
             self.send(self.hello())
 
@@ -337,6 +411,65 @@ class Desk:
         a, self.ask = self.ask, None
         self.flash(ok)
         self.send({"t": "rule", "id": a.get("id"), "ok": bool(ok)})
+
+    def press(self, x, y):
+        """Act on a press at (x, y).
+
+        Split out of the main loop so the same code answers the touch panel
+        and a press sent down the wire, which is what makes the screen
+        testable without a thumb.
+
+        The order here has to agree with draw(): whatever is on the screen is
+        what a press is about. An approval is drawn over the transcript, so it
+        is ruled on before the transcript sees the press - otherwise the gate
+        is visible and unanswerable, which is the worst of both.
+        """
+        if self.flash_until:
+            return
+        if self.ap and y > 168:
+            self.portal(False)              # tap to stop handing over
+        elif self.ask and y > 145:
+            self.rule(x > 160)
+        elif self.chat:
+            # up / close / down along the bottom; anywhere above is a page
+            # down, which is what a thumb does to a wall of text it is reading
+            rows = len(self.lines())
+            last = max(0, rows - self.ROWS)
+            if y > 204:
+                third = T.W // 3
+                if x < third:
+                    self.top = max(0, self.top - self.ROWS)
+                elif x < 2 * third:
+                    self.chat = False
+                else:
+                    self.top = min(last, self.top + self.ROWS)
+            else:
+                self.top = min(last, self.top + self.ROWS)
+            self.dirty = True
+        elif not self.ask and 84 < y <= 138:
+            # the room, which the idle screen shows two lines of - enough to
+            # see that something was said and not enough to read it
+            self.chat = True
+            self.top = max(0, len(self.lines()) - self.ROWS)
+            self.dirty = True
+        elif not self.ask and 138 < y <= 172:
+            self.portal(True)               # the strip above START
+        elif not self.ask and y > 172:
+            # anything below the header. There is nothing else to press on
+            # this screen, and a resistive panel read through a rough
+            # calibration lands lower than the bar is drawn.
+            # Sent before the button is drawn: the computer should hear about
+            # it first, the highlight can wait 28ms.
+            self.send({"t": "start"})
+            self.start_button(True)
+            self.flash_until = time.ticks_add(time.ticks_ms(), 400)
+            # START only means anything on a computer that already has the
+            # Bits on it - something has to be listening for it. So pressing
+            # it settles the question the access point was there to ask, and
+            # the radio can go down. A power cycle brings it back, which is
+            # the case that matters: a board carried to a bare machine.
+            if self.ap_live:
+                self.portal(False)
 
     def run(self):
         poll = select.poll()
@@ -386,28 +519,6 @@ class Desk:
             hit = self.t.get()
             if self.dirty:
                 self.draw()
-            if hit and not self.flash_until:
-                if self.ap and hit[1] > 168:
-                    self.portal(False)          # tap to stop handing over
-                elif not self.ask and 138 < hit[1] <= 172:
-                    self.portal(True)           # the strip above START
-                elif self.ask and hit[1] > 145:
-                    self.rule(hit[0] > 160)
-                elif not self.ask and hit[1] > 172:
-                    # anything below the header. There is nothing else to press
-                    # on this screen, and a resistive panel read through a
-                    # rough calibration lands lower than the bar is drawn.
-                    # Sent before the button is drawn: the computer should hear
-                    # about it first, the highlight can wait 28ms.
-                    self.send({"t": "start"})
-                    self.start_button(True)
-                    self.flash_until = time.ticks_add(time.ticks_ms(), 400)
-                    # START only means anything on a computer that already has
-                    # the Bits on it - something has to be listening for it.
-                    # So pressing it settles the question the access point was
-                    # there to answer, and the radio can go down. A power cycle
-                    # brings it back, which is the case that matters: a board
-                    # carried to a machine that has nothing.
-                    if self.ap_live:
-                        self.portal(False)
+            if hit:
+                self.press(hit[0], hit[1])
             time.sleep_ms(20)

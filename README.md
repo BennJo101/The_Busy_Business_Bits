@@ -426,6 +426,22 @@ build on it:
 - That left the touch panel on the bus the card wanted, so touch is bit-banged
   now. It is read at 1MHz and never noticed.
 
+### Reading the room on the board
+
+The idle screen shows who is in the room and the last two lines said. Tapping
+that area opens the whole transcript full screen — the last forty turns, with
+each speaker in their own colour — and a bar along the bottom gives **up**,
+**close** and **down**. Tapping anywhere above the bar is a page down, which is
+what a thumb does to a wall of text it is reading.
+
+An approval always wins: if one arrives while the transcript is open it is
+drawn over it and the buttons rule on it, rather than the press going to the
+scroll and the gate sitting there visible and unanswerable.
+
+The board also accepts `{"t":"tap","x":..,"y":..}`, which goes through exactly
+the same code as the touch panel. That is how the screen gets tested without a
+thumb.
+
 ### START, and the board's own radios
 
 The idle screen has a **START** bar across the bottom. Pressing it brings the
