@@ -374,13 +374,19 @@ built without exFAT, so an exFAT card mounts on the computer and not on the
 board. Windows will only *create* FAT32 up to 32GB — which is 86x more than the
 371MB this needs, so that limit costs nothing here.
 
-The two copies live side by side and never meet:
+What the card carries:
 
 | On the card | Read by | What it is |
 |---|---|---|
-| `\BitsPortable\` | a card reader | The whole environment — Python, Obsidian, app, vault |
 | `\BusyBusinessBits\` | the board | The project, for handing over down the serial line |
-| `\BusyBusinessBitsVault\` | the board | The vault, likewise |
+| `\BusyBusinessBitsVault\` | the board | The Bits' vault, likewise |
+
+A `\BitsPortable\` folder — a whole environment with Python and Obsidian in it,
+for running from a card reader — is what `setup_card.py --bundle` writes, and it
+is worth having only if you intend to put the card in a reader. Through the
+board it is unreachable: 368MB at 10KB/s is most of a day, and the board cannot
+even list a tree that size. If the board is the only way you plug the card in,
+leave it off and keep the space.
 
 ### Their own vault
 
