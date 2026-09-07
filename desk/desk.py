@@ -34,6 +34,18 @@ PALETTE = {
 }
 
 
+# The 8x8 font at scale 1, across a 320px screen with an 8px margin each side.
+# Anything drawn wider than this runs off the edge or into whatever is drawn
+# after it.
+COLS = 38
+
+
+def fits(left, right, cols=COLS):
+    """Two labels on one line, guaranteed not to overlap."""
+    keep = cols - (len(right) + 1 if right else 0)
+    return left[:max(0, keep)], right
+
+
 def wrap(text, cols):
     """Break a line to fit, on spaces where it can."""
     out, line = [], ""
@@ -200,12 +212,20 @@ class Desk:
         # anything, so what it needs to know has to be legible without
         # pressing anything first.
         if self.ap_live:
-            d.text("set up a computer: " + P_NAME, 8, 152, self.GOLD, strip)
+            d.text(("set up a computer: " + P_NAME)[:COLS], 8, 152,
+                   self.GOLD, strip)
         else:
-            d.text("hand over to a new computer", 8, 152, self.GOLD, strip)
-            d.text("carrying %d files" % self.carrying if self.carrying
-                   else "nothing needs you", T.W - 8 * 17 - 8, 152, self.DIM,
-                   strip)
+            # Both ends of the strip, and they must not meet in the middle.
+            # The right-hand label used to be placed as though it were always
+            # seventeen characters wide, so a longer one started before the
+            # left-hand one had finished and overwrote its tail: "hand over to
+            # a new cocarrying101 files".
+            right = ("%d files" % self.carrying) if self.carrying else ""
+            room = COLS - (len(right) + 1 if right else 0)
+            d.text("hand over to a new computer"[:room], 8, 152,
+                   self.GOLD, strip)
+            if right:
+                d.text(right, T.W - 8 * len(right) - 8, 152, self.DIM, strip)
         self.start_button()
 
     def start_button(self, hit=False):

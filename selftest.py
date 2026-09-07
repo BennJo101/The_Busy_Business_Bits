@@ -544,6 +544,43 @@ def test_undo_filing():
         tools._save(tools.FILINGS_PATH, keep)   # leave the real log alone
 
 
+def test_board_labels():
+    """The board's own text, checked here because it cannot be checked there.
+
+    desk.py imports machine and tft, so it will not load on a PC - but the
+    part that decides how wide a label is has nothing to do with hardware,
+    and getting it wrong draws one label straight through another. It did:
+    "hand over to a new cocarrying101 files".
+    """
+    print("what the board draws")
+    here = os.path.dirname(os.path.abspath(__file__))
+    src = open(os.path.join(here, "desk", "desk.py"), encoding="utf-8").read()
+    ns = {}
+    start = src.index("COLS = ")
+    exec(src[start:src.index("class Desk:")], ns)              # noqa: S102
+    fits, wrap, COLS = ns["fits"], ns["wrap"], ns["COLS"]
+    W = 320
+
+    def clash(left, right):
+        l, r = fits(left, right)
+        return 8 + 8 * len(l) > (W - 8 * len(r) - 8 if r else W)
+
+    check("the strip's two labels never meet",
+          not clash("hand over to a new computer", "101 files"))
+    check("nor with a bigger card",
+          not clash("hand over to a new computer", "999999 files"))
+    check("nor with nothing on it",
+          not clash("hand over to a new computer", ""))
+    check("a long left label is cut, not overlapped",
+          not clash("x" * 80, "101 files"))
+    check("the network name fits the strip",
+          len("set up a computer: BusyBusinessBits") <= COLS)
+    check("wrapped body text fits the screen",
+          all(len(l) <= COLS for l in wrap("a " * 200, COLS)))
+    check("a word longer than the screen is broken, not dropped",
+          "".join(wrap("z" * 100, COLS)) == "z" * 100)
+
+
 def test_install_over_itself():
     print("installing over a running copy")
     import shutil
@@ -706,7 +743,7 @@ def main():
               test_summoning, test_sprites, test_routing, test_the_floor,
               test_layout, test_wake, test_desk, test_vault, test_radios,
               test_undo_filing, test_settings, test_approvals_bounded,
-              test_install_over_itself,
+              test_board_labels, test_install_over_itself,
               test_one_watcher,
               test_clipboard, test_party):
         t()
