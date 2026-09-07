@@ -31,8 +31,20 @@ ROOTS = {"app": "/sd/BusyBusinessBits", "vault": "/sd/BusyBusinessBitsVault",
 
 
 def join(b, ssid, password, seconds=40):
-    """Put the board on the network and hand back its address."""
+    """Put the board on the network and hand back its address.
+
+    The access point comes up with the board and stays up, so by the time we
+    get here it is already broadcasting and already serving its own web page.
+    Leaving it running through a transfer means two radios sharing one aerial
+    and two server threads sharing 140KB of heap, and the far end simply stops
+    reading partway through a 35MB send. So it is stood down first - this is a
+    deliberate maintenance action, and a power cycle brings it back.
+    """
     b.run("import radio")
+    try:
+        b.run("import portal\nportal.stop_ap()", timeout=20)
+    except SystemExit:
+        pass                          # not running, which is just as good
     got = b.run("print(radio.connect(%r, %r, %d))" % (ssid, password, seconds),
                 timeout=seconds + 25).strip()
     if "'connected': True" not in got and '"connected": true' not in got.lower():
