@@ -41,6 +41,10 @@ STARTUP = os.path.join(os.environ.get("APPDATA", HOME), "Microsoft", "Windows",
                        "Start Menu", "Programs", "Startup")
 LAUNCHER = "Busy Business Bits.bat"
 
+# What an uninstall must not touch, and what to call it when saying so.
+KEEP = ("State", "Vault")
+WHAT = {"State": "settings", "Vault": "notes"}
+
 # Raw, and joined with os.path.join below: written as a plain string, the
 # "\b" of "\bits_desk.py" is a backspace, and the launcher it wrote pointed at
 # "Appits_desk.py".
@@ -88,14 +92,23 @@ def remove():
         os.remove(boot)
         gone.append("the startup entry")
     if os.path.isdir(TARGET):
-        keep = os.path.join(TARGET, "State")
-        if os.path.isdir(keep):
-            print("   leaving your settings and notes at %s" % keep)
-            for name in os.listdir(TARGET):
-                if name != "State":
-                    p = os.path.join(TARGET, name)
-                    shutil.rmtree(p, ignore_errors=True) if os.path.isdir(p) \
-                        else os.remove(p)
+        # State is the approval queue and the task list; Vault is the notes.
+        # Both belong to whoever installed this, not to the installer, and an
+        # uninstall has no business taking them. The first version kept State
+        # alone while announcing it was "leaving your settings and notes" -
+        # and then deleted the notes.
+        kept = [d for d in KEEP if os.path.isdir(os.path.join(TARGET, d))]
+        for name in os.listdir(TARGET):
+            if name in kept:
+                continue
+            here = os.path.join(TARGET, name)
+            if os.path.isdir(here):
+                shutil.rmtree(here, ignore_errors=True)
+            else:
+                os.remove(here)
+        if kept:
+            print("   leaving your %s at %s"
+                  % (" and ".join(WHAT[d] for d in kept), TARGET))
         else:
             shutil.rmtree(TARGET, ignore_errors=True)
         gone.append("the copy in %s" % TARGET)
