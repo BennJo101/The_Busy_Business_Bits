@@ -46,18 +46,52 @@ def _is_dir(path):
         return False
 
 
-def walk(root=ROOT):
+MAX_LISTING = 1200        # entries the board can hold and still answer
+TOO_BIG = ("(too big for this board to list)", 0)
+
+
+def walk(root=ROOT, limit=MAX_LISTING):
     """Every file under root as (path relative to root, size).
 
     Iterative rather than recursive: the depth is small but the stack on this
     board is smaller, and a folder of sprites is no place to find that out.
+
+    Capped, and it says when it hits the cap. A tree of a few thousand files
+    does not fit in 144KB of heap, and the failure mode was a short list that
+    looked like a complete one - which would have quietly handed over a partial
+    copy of the project. The app and the vault are well inside the cap; only a
+    whole portable runtime is not, and that is not what this link is for.
     """
+    import gc
     out = []
+    try:
+        _walk_into(root, out, limit)
+    except MemoryError:
+        # A tree this size does not fit in the heap. The marker is built at
+        # import time on purpose: formatting a message needs memory, and there
+        # is none left at the moment you want to explain that.
+        # Even appending needs a bigger block than is left, so give the heap
+        # something back before trying to say anything.
+        del out[len(out) // 2:]
+        gc.collect()
+        out.append(TOO_BIG)
+    return out
+
+
+def _walk_into(root, out, limit):
+    import gc
     stack = [root]
     while stack:
         here = stack.pop()
+        gc.collect()          # a big tree runs the board out of heap, and a
+                              # listdir that fails for want of memory used to
+                              # be skipped in silence - a short answer that
+                              # looked like a complete one
         try:
             names = os.listdir(here)
+        except MemoryError:
+            out.append(("(too big to list: %s)" % here, 0))
+            continue
         except Exception:
             continue
         for name in names:
@@ -69,7 +103,9 @@ def walk(root=ROOT):
                     out.append((full[len(root) + 1:], os.stat(full)[6]))
                 except Exception:
                     pass
-    return out
+                if len(out) >= limit:
+                    out.append(("(listing stopped at %d files)" % limit, 0))
+                    return
 
 
 def total(root=ROOT):
