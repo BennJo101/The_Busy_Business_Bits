@@ -372,11 +372,24 @@ GATED = {EXECUTE, SEND, DESTROY}
 ON_APPROVAL_NEEDED = None
 
 
+# How much of the approval history to keep. It is read, parsed and written
+# again on every gated call, so it cannot grow forever: a few hundred entries
+# is a useful record of what was asked and what was decided, and it keeps the
+# file small enough that the gate stays quick. Anything still pending is kept
+# whatever the count - dropping an undecided request would lose a Bit's work.
+KEEP_DECIDED = 400
+
+
 def _approvals():
     return _load(APPROVALS_PATH, {"seq": 0, "items": []})
 
 
 def _put_approvals(a):
+    items = a.get("items") or []
+    if len(items) > KEEP_DECIDED:
+        pending = [i for i in items if i.get("state") == "pending"]
+        decided = [i for i in items if i.get("state") != "pending"]
+        a["items"] = decided[-KEEP_DECIDED:] + pending
     _save(APPROVALS_PATH, a)
 
 

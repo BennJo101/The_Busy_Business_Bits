@@ -544,6 +544,31 @@ def test_undo_filing():
         tools._save(tools.FILINGS_PATH, keep)   # leave the real log alone
 
 
+def test_approvals_bounded():
+    print("the approval log stays a sensible size")
+    keep = tools._approvals()
+    try:
+        n = tools.KEEP_DECIDED
+        made = [{"id": "X%d" % i, "bit": "The Coder", "tool": "run_shell",
+                 "args": {}, "summary": "s", "asked": "t",
+                 "state": "approved"} for i in range(n + 60)]
+        made += [{"id": "P1", "bit": "The Coder", "tool": "run_shell",
+                  "args": {}, "summary": "s", "asked": "t", "state": "pending"}]
+        tools._put_approvals({"seq": len(made), "items": list(made)})
+        got = tools._approvals()["items"]
+        check("a long history is trimmed", len(got) <= n + 1, len(got))
+        check("the newest decisions are the ones kept",
+              got[-2]["id"] == "X%d" % (n + 59), got[-2]["id"])
+        check("nothing still pending is ever dropped",
+              any(i["id"] == "P1" for i in got))
+        # and a short log is left alone
+        tools._put_approvals({"seq": 2, "items": made[:2]})
+        check("a short history is untouched",
+              len(tools._approvals()["items"]) == 2)
+    finally:
+        tools._put_approvals(keep)          # leave the real log as it was
+
+
 def test_one_watcher():
     print("only one watcher")
     import bits_desk
@@ -641,7 +666,8 @@ def main():
     for t in (test_room_rules, test_ask_bit, test_ownership, test_gate,
               test_summoning, test_sprites, test_routing, test_the_floor,
               test_layout, test_wake, test_desk, test_vault, test_radios,
-              test_undo_filing, test_settings, test_one_watcher,
+              test_undo_filing, test_settings, test_approvals_bounded,
+              test_one_watcher,
               test_clipboard, test_party):
         t()
     print()
