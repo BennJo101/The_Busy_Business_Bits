@@ -207,7 +207,18 @@ def main():
     print("   to   %s" % TARGET)
     parts = [("Python", "the runtime"), ("App", "the app"), ("Vault", "the vault")]
     if args.with_obsidian:
-        parts.append(("Obsidian", "Obsidian"))
+        # It only travels if it was put on the card, and it usually is not -
+        # it is 290MB. Asking for it and being given a silent no was worse
+        # than not offering it: the install looked identical either way, so
+        # the only way to find out was to go looking for a folder.
+        if os.path.isdir(os.path.join(CARD, "Obsidian")):
+            parts.append(("Obsidian", "Obsidian"))
+        else:
+            print("   no Obsidian on the card, so it is not coming across.")
+            print("   The vault still arrives; open it with an Obsidian that "
+                  "is already on this machine,")
+            print("   or put one on the card as an Obsidian\\ folder next to "
+                  "App\\ and Python\\.")
     want = sum(size_of(os.path.join(CARD, p)) for p, _ in parts
                if os.path.isdir(os.path.join(CARD, p)))
     print("   %.0f MB" % (want / 1048576.0))
