@@ -454,6 +454,55 @@ deliberate: the link to the board moves 7KB/s and the board has 140KB of RAM, so
 routing a conversation through it would make every reply take minutes. The
 Investigator pulling a page down is the part worth moving.
 
+### Checking the board
+
+```
+python desk/board_check.py                 everything but joining a network
+python desk/board_check.py SSID PASSWORD   and join, and fetch over its radio
+```
+
+Walks the whole unit on the hardware and needs neither the app nor an API key:
+the link, the card mounting and a file read back off it byte-for-byte, the WiFi
+and Bluetooth scans, then the parts only a person can confirm — the light, and
+each of the three touch targets in turn. The board's own screen tells you what
+to press.
+
+### Installing it on a computer
+
+```
+Install on this computer.bat        copy it here, and start with Windows
+Uninstall from this computer.bat    take it back out (your notes stay)
+```
+
+**Windows will not run anything by itself when a card is plugged in.** AutoRun
+was switched off for removable media years ago and cannot be switched back on,
+so there is always one double-click. That double-click is this one, and it is
+the last one: it copies the runtime, the app and the vault into
+`%LOCALAPPDATA%\Busy Business Bits`, and drops a launcher in Startup so the
+watcher is running from login. After that the board is enough on its own — plug
+it in, press START, and the Bits come up with nothing else running first.
+
+Nothing goes outside your own profile, and the uninstaller leaves `State\`
+alone so the notes and the API key survive it.
+
+#### What can and cannot come down the wire
+
+The board is a 7.2KB/s serial link, which is the whole constraint:
+
+| | size | through the board |
+|---|---|---|
+| the project | 3.2 MB | about seven minutes |
+| the Python runtime | 78 MB | about three hours |
+| Obsidian | 290 MB | about eleven and a half |
+
+So a machine that already has Python can be served entirely by the board. A
+machine with nothing needs the runtime to arrive another way — the card in a
+reader once, or a download from python.org.
+
+This chip cannot do better: it talks through a CH340 serial bridge and has no
+USB peripheral, so it can never present the card to Windows as a drive. An
+ESP32-S3 has native USB, which is what that would take.
+
 ### The light
 
 | | |

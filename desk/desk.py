@@ -83,6 +83,7 @@ class Desk:
         self.dirty = True
         self.flash_until = 0
         self.pulse = 0
+        self.ticks = 0          # main-loop counter, so a stall is visible
 
     def lamp(self, r=False, g=False, b=False):
         self.led["r"].value(0 if r else 1)
@@ -238,6 +239,18 @@ class Desk:
                 self.dirty = True
         elif kind == "radio":
             self.radio(msg)
+        elif kind == "state":
+            # what it thinks it is showing. Worth having: the difference
+            # between "the touch panel is wrong" and "the screen is not the
+            # one you think it is" cost an hour of guessing once.
+            self.send({"t": "state", "ticks": self.ticks,
+                       "ask": (self.ask or {}).get("id"),
+                       "flash": bool(self.flash_until), "dirty": self.dirty,
+                       "carrying": self.carrying, "in": self.room.get("in"),
+                       "irq": self.t.irq.value(), "raw": self.t.raw()})
+            # deliberately not t.get(): that consumes the press and resets the
+            # debounce, so asking what the screen sees would take the press
+            # away from the loop that acts on it
         elif kind == "ping":
             self.send(self.hello())
 
@@ -281,11 +294,17 @@ class Desk:
                     self.lamp(r=bool(p), g=bool(p))
             if self.dirty:
                 self.draw()
+            self.ticks += 1
             hit = self.t.get()
             if hit and not self.flash_until:
                 if self.ask and hit[1] > 145:
                     self.rule(hit[0] > 160)
-                elif not self.ask and hit[1] > 168:
+                elif not self.ask and hit[1] > 60:
+                    # anything below the header. There is nothing else to press
+                    # on this screen, and a resistive panel read through a
+                    # rough calibration lands lower than the bar is drawn - so
+                    # a tap on the START bar was missing a threshold set to
+                    # where the bar actually is.
                     self.start_button(True)
                     self.send({"t": "start"})
                     self.flash_until = time.ticks_add(time.ticks_ms(), 500)
