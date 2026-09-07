@@ -661,13 +661,41 @@ def _which(cmd):
 # ----------------------------------------------------------------------------
 # Settings
 # ----------------------------------------------------------------------------
+# Every setting, and what it is when nobody has said otherwise. One copy of
+# this, on purpose: the defaults used to live at each of twenty call sites and
+# again, incompletely, in the fallback below - so a machine whose settings file
+# had never been written could behave differently from one that had, and the
+# only way to know which was to read all twenty.
+DEFAULT_SETTINGS = {
+    "api_key": "",
+    "model": "",
+    "user_name": "",
+    "voices": True,        # the Bits speak
+    "chatter": True,       # they talk among themselves
+    "wake": True,          # "Bits" wakes the console
+    "wake_word": "",       # blank means WAKE_WORD
+    "ambient": True,       # the watchers notice things unprompted
+    "board_net": False,    # use the desk unit's radios rather than this machine's
+    "webhooks": {},
+}
+
+
 def load_settings():
+    """The settings file, over the defaults.
+
+    Merged rather than returned as-is, so a file written before a setting
+    existed still answers for it - which is what happens every time the app
+    gains one, and on any machine the card is carried to.
+    """
+    s = dict(DEFAULT_SETTINGS)
     try:
         with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+            got = json.load(f)
+        if isinstance(got, dict):
+            s.update(got)
     except Exception:
-        return {"api_key": "", "model": "", "voices": True, "chatter": True,
-                "wake": True, "webhooks": {}}
+        pass
+    return s
 
 
 def save_settings(s):

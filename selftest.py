@@ -544,6 +544,54 @@ def test_undo_filing():
         tools._save(tools.FILINGS_PATH, keep)   # leave the real log alone
 
 
+def test_settings():
+    print("settings")
+    import json
+    import re
+    import tempfile
+    keys = set(core.DEFAULT_SETTINGS)
+    check("there is one table of defaults", len(keys) >= 8, sorted(keys))
+
+    real = core.SETTINGS_PATH
+    try:
+        p = os.path.join(tempfile.mkdtemp(), "s.json")
+        core.SETTINGS_PATH = p
+        check("a missing file gives every default",
+              set(core.load_settings()) == keys)
+        open(p, "w").write("{}")
+        check("an empty file does too", set(core.load_settings()) == keys)
+        open(p, "w").write(json.dumps({"api_key": "k", "wake": False}))
+        s = core.load_settings()
+        check("what is written wins", s["api_key"] == "k" and s["wake"] is False)
+        check("and the rest still answer", s["ambient"] is True
+              and s["board_net"] is False and s["voices"] is True)
+        open(p, "w").write("not json at all {{{")
+        check("a corrupt file falls back rather than throwing",
+              set(core.load_settings()) == keys)
+    finally:
+        core.SETTINGS_PATH = real
+
+    # The defaults used to be written out at each call site as well as here,
+    # and the two could disagree without anything saying so. They still live
+    # at the call sites - `.get(key, default)` reads better than a lookup - so
+    # this is what keeps them honest.
+    here = os.path.dirname(os.path.abspath(__file__))
+    src = open(os.path.join(here, "busy_business_bits.py"),
+               encoding="utf-8").read()
+    lit = {"True": True, "False": False, '""': "", "{}": {}}
+    drift, unknown = [], []
+    for key, dflt in re.findall(
+            r'settings\.get\(\s*"([a-z_]+)"\s*(?:,\s*(True|False|""|\{\}))?\s*\)',
+            src):
+        if key not in keys:
+            unknown.append(key)
+        elif dflt and lit[dflt] != core.DEFAULT_SETTINGS[key]:
+            drift.append("%s: %s here, %r in the table"
+                         % (key, dflt, core.DEFAULT_SETTINGS[key]))
+    check("every setting read is one the table knows", not unknown, unknown)
+    check("and no call site disagrees with it", not drift, drift)
+
+
 def test_clipboard():
     print("the clipboard")
     if not tools.WINDOWS:
@@ -578,7 +626,7 @@ def main():
     for t in (test_room_rules, test_ask_bit, test_ownership, test_gate,
               test_summoning, test_sprites, test_routing, test_the_floor,
               test_layout, test_wake, test_desk, test_vault, test_radios,
-              test_undo_filing, test_clipboard, test_party):
+              test_undo_filing, test_settings, test_clipboard, test_party):
         t()
     print()
     if FAILED:
