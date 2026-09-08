@@ -41,10 +41,20 @@ def join(b, ssid, password, seconds=40):
     deliberate maintenance action, and a power cycle brings it back.
     """
     b.run("import radio")
+    # Only if it is actually up. Importing portal to stop an access point that
+    # was never started costs a chunk of the memory the transfer needs, and a
+    # 35MB send that runs out of it dies a fifth of the way in with nothing
+    # said - the board just closes the connection.
     try:
-        b.run("import portal\nportal.stop_ap()", timeout=20)
+        up = b.run("import network\n"
+                   "print(network.WLAN(network.AP_IF).active())").strip()
     except SystemExit:
-        pass                          # not running, which is just as good
+        up = "False"
+    if up == "True":
+        try:
+            b.run("import portal\nportal.stop_ap()", timeout=20)
+        except SystemExit:
+            pass
     got = b.run("print(radio.connect(%r, %r, %d))" % (ssid, password, seconds),
                 timeout=seconds + 25).strip()
     if "'connected': True" not in got and '"connected": true' not in got.lower():
@@ -139,7 +149,8 @@ def main():
     ap.add_argument("--port", default="")
     args = ap.parse_args()
 
-    b = c.Board(args.port or c.guess_port())
+    # bare: a transfer needs the memory the desk unit would be holding
+    b = c.Board(args.port or c.guess_port(), bare=True)
     try:
         print("putting the board on %s ..." % args.ssid)
         ip = join(b, args.ssid, args.password)

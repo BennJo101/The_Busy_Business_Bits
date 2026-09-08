@@ -150,8 +150,14 @@ def serve(seconds=0):
                     break
                 else:
                     _send(conn, b"")
-        except Exception:
-            pass
+        except Exception as e:                  # noqa: BLE001
+            # Say why. Swallowing it made every failure identical from the far
+            # end - the connection simply closed - so a memory error, a full
+            # card and a bad path all looked like the same nothing.
+            try:
+                print("netserve: %s: %s" % (type(e).__name__, e))
+            except Exception:
+                pass
         finally:
             try:
                 conn.close()

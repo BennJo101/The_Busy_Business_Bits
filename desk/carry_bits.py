@@ -65,7 +65,7 @@ class Board:
     JSON protocol - same wire, without a line of JSON and a per-character parse
     around every kilobyte."""
 
-    def __init__(self, port):
+    def __init__(self, port, bare=False):
         self.s = serial.Serial()
         self.s.port = port
         self.s.baudrate = 115200
@@ -74,6 +74,31 @@ class Board:
         self.s.rts = False
         self.s.open()
         time.sleep(0.2)
+        self._bare() if bare else self._raw()
+
+    def _bare(self):
+        """Take the REPL before main.py has imported anything.
+
+        On boot the desk unit imports itself, the screen driver, the touch
+        panel and the radio, and compiling desk.py alone wants twenty-odd
+        kilobytes. Interrupting after all that leaves about 75KB free, which
+        is not enough to run a file server and hold a socket buffer as well:
+        a 35MB payload died a fifth of the way in, every time, and the board
+        closed the connection without saying why.
+
+        Interrupting during the boot instead leaves 164KB. Nothing is lost by
+        it - the desk is going to be restarted afterwards anyway.
+        """
+        self.s.dtr = False
+        self.s.rts = True               # hold in reset
+        time.sleep(0.2)
+        self.s.rts = False              # and let it boot
+        end = time.time() + 3.0
+        while time.time() < end:        # interrupt it before it gets going
+            self.s.write(b"\x03")
+            time.sleep(0.02)
+        time.sleep(0.4)
+        self.s.reset_input_buffer()
         self._raw()
 
     def _hard_reset(self):
@@ -563,7 +588,9 @@ def main():
     if not port:
         sys.exit("no board found. Plug it in, or pass --port COM7.")
     print("board on %s" % port)
-    b = Board(port)
+    # A payload is 35MB through a file the board has to hold open; it
+    # wants the memory the desk unit would otherwise be sitting on.
+    b = Board(port, bare=bool(args.payload))
     try:
         if args.list:
             do_list(b)

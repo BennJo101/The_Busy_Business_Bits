@@ -144,6 +144,7 @@ class Desk:
         self.dirty = True
         self.flash_until = 0
         self.pulse = 0
+        self.strip_top = 146   # set by draw_idle; the touch chain reads it
         self._ip = ""          # the address on a real network, cached
         self._ip_at = 0
         self.ticks = 0          # main-loop counter, so a stall is visible
@@ -232,8 +233,16 @@ class Desk:
         d.fill(third, 208, 1, 32, self.INK)
         d.fill(2 * third, 208, 1, 32, self.INK)
 
+    # Where the strip begins. It is taller while the access point is up,
+    # because that is when it has three things to say, and a press has to mean
+    # what it looks like it means - so this decides the touch boundary too,
+    # rather than the two being written down separately and drifting.
+    def strip_at(self):
+        return 126 if self.ap_live else 146
+
     def draw_idle(self):
         d = self.d
+        self.strip_top = self.strip_at()
         d.clear(self.INK)
         self.header("THE BUSY BUSINESS BITS", self.DARK, self.GOLD)
         here = self.room.get("in") or []
@@ -267,7 +276,7 @@ class Desk:
         # gets fewer lines of what was said, which is the right way round -
         # the transcript is a tap away and the roster is not.
         for line in wrap(say, COLS):
-            if y > 144 - 14:
+            if y > self.strip_top - 16:
                 break
             d.text(line, 8, y, self.PAPER, self.INK)
             y += 14
@@ -275,15 +284,18 @@ class Desk:
         # the board alone: the computer it is being handed to has no software
         # to ask for it with, which is the entire problem being solved.
         strip = d.rgb(42, 30, 36)
-        d.fill(0, 140, T.W, 32, strip)
-        # Two lines, because what a bare computer needs is a network to join
-        # and an address to open, and neither is any use without the other.
-        # It has to be legible without pressing anything: the machine being
-        # set up has no way of being told any of this.
+        d.fill(0, self.strip_top, T.W, 172 - self.strip_top, strip)
+        # Three lines, because a bare computer needs the network, the password
+        # for it and the address to open, and no two of those are any use
+        # without the third. It has to be legible without pressing anything:
+        # the machine being set up has no way of being told any of it.
         if self.ap_live:
-            d.text(("SSID: " + P_NAME)[:COLS], 8, 143, self.GOLD, strip)
-            d.text(("Webpage: " + self.ap_live)[:COLS], 8, 157,
-                   self.PAPER, strip)
+            y = self.strip_top + 3
+            for text, ink in (("SSID: " + P_NAME, self.GOLD),
+                              ("Password: " + P_PASS, self.PAPER),
+                              ("Webpage: " + self.ap_live, self.PAPER)):
+                d.text(text[:COLS], 8, y, ink, strip)
+                y += 14
         elif self.station_ip():
             # set up, and on a real network: the address it can be reached at
             d.text(("IP: " + self.station_ip())[:COLS], 8, 150,
@@ -589,13 +601,13 @@ class Desk:
             else:
                 self.top = min(last, self.top + self.ROWS)
             self.dirty = True
-        elif not self.ask and 84 < y <= 138:
+        elif not self.ask and 84 < y <= self.strip_top:
             # the room, which the idle screen shows two lines of - enough to
             # see that something was said and not enough to read it
             self.chat = True
             self.top = max(0, len(self.lines()) - self.ROWS)
             self.dirty = True
-        elif not self.ask and 138 < y <= 172:
+        elif not self.ask and self.strip_top < y <= 172:
             self.portal(True)               # the strip above START
         elif not self.ask and y > 172:
             # anything below the header. There is nothing else to press on
