@@ -375,8 +375,16 @@ def watch():
     print("waiting for START on the desk unit. Ctrl-C to give up.",
           flush=True)
     try:
+        empty = False
         while not pressed.wait(0.5):
-            pass
+            # The watcher holding the port *is* the Bits not running, so the
+            # board should not still be showing a room. It says so once, as
+            # soon as the board answers - which covers the app being killed
+            # rather than closed, when nothing gets the chance to tidy up.
+            if not empty and desk.here():
+                desk.clear()
+                desk.room([], "", "")
+                empty = True
     except KeyboardInterrupt:
         desk.stop()
         return

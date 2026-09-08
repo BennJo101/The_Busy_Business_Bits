@@ -1910,12 +1910,23 @@ class App:
         self.root.geometry("%dx%d+%d+%d" % (w, h, x, y))
 
     def quit(self):
-        if self.desk:
-            self.desk.stop()
         self.ears.stop()
         self.party.stop()
         self.speaker.stop()
         self.dismiss_all()
+        if self.desk:
+            # Say the room is empty before letting go of the wire. Stopping
+            # the desk first closed the port with the last roster still on the
+            # board's screen, so a machine with nothing running on it sat there
+            # claiming the Boss and the Coder were in the room - and the only
+            # way to find out otherwise was to press START.
+            try:
+                self.desk.clear()
+                self.desk.room([], "", "")
+                time.sleep(0.2)          # let it go out before the port shuts
+            except Exception:                                     # noqa: BLE001
+                pass
+            self.desk.stop()
         self.root.destroy()
 
 
