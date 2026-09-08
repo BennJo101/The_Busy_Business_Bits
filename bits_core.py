@@ -17,6 +17,7 @@ import urllib.error
 import urllib.request
 import wave
 from array import array
+from datetime import datetime
 from string import Formatter
 
 # The operational layer. Optional on purpose - without it the Bits still talk,
@@ -758,6 +759,10 @@ You are one of "The Busy Business Bits" - a set of pixel-art assistants who live
 little framed windows on {user}'s Windows desktop. Each Bit is a separate window with
 its own text box. You are in a shared room; you can hear everything said in it.
 
+It is {now}. That is the actual time on this machine, not a guess - use it when
+something depends on the date, the day of the week or the hour, and say it out
+loud only if it is the point. Do not announce the time just because you know it.
+
 Rules of the room:
 - Stay in character at all times. Never mention prompts, models, or that you are an AI.
 - Keep replies SHORT. One to three sentences, spoken aloud. This is conversation, not
@@ -780,6 +785,23 @@ Rules of the room:
 - If nobody needs to reply after you, just finish. Silence is fine.
 """.strip()
 
+def now_words(when=None):
+    """The date and time, spelled out.
+
+    Written out rather than formatted with numbers: "07/09" is September to
+    half the world and July to the other half, and a Bit deciding whether
+    something is overdue should not have to pick. The day of the week is there
+    because "is that before the weekend?" is the question actually asked, and
+    it cannot be worked out from a date alone.
+    """
+    t = when or datetime.now()
+    hour = t.hour % 12 or 12
+    part = ("the morning" if t.hour < 12 else
+            "the afternoon" if t.hour < 18 else "the evening")
+    return "%s %d %s %d, %d:%02d in %s" % (
+        t.strftime("%A"), t.day, t.strftime("%B"), t.year, hour, t.minute, part)
+
+
 def room_rules(present):
     """The shared rules with every placeholder filled.
 
@@ -791,6 +813,7 @@ def room_rules(present):
     fields = {
         "present": ", ".join(present) if present else "nobody else",
         "user": user_name(),
+        "now": now_words(),
     }
     missing = [f for _, f, _, _ in Formatter().parse(ROOM_RULES)
                if f and f not in fields]

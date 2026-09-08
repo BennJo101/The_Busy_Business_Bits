@@ -39,6 +39,22 @@ def test_room_rules():
     check("the roster is named", "The Boss, The Coder" in text)
     check("an empty room still renders", "nobody else" in core.room_rules([]))
 
+    # A Bit that does not know the date cannot tell you whether something is
+    # overdue, and will happily guess. Spelled out, because "07/09" is
+    # September to half the world and July to the other half.
+    from datetime import datetime
+    words = core.now_words(datetime(2026, 7, 9, 15, 4))
+    check("the date is written out, not numbered",
+          words == "Thursday 9 July 2026, 3:04 in the afternoon", words)
+    check("the day of the week is in it", "Thursday" in words)
+    check("midnight is not hour zero",
+          "12:30 in the morning" in core.now_words(datetime(2026, 1, 1, 0, 30)),
+          core.now_words(datetime(2026, 1, 1, 0, 30)))
+    check("noon is the afternoon, not the morning",
+          "12:00 in the afternoon" in core.now_words(datetime(2026, 1, 1, 12, 0)))
+    check("and every Bit is told it",
+          core.now_words()[:6] in core.room_rules(["The Boss"]))
+
 
 def test_ask_bit():
     """The whole reply path, transport stubbed."""
@@ -65,6 +81,10 @@ def test_ask_bit():
         check("the system prompt is fully rendered",
               "{" not in sent[0]["system"].replace("{present}", ""))
         check("tool rules are attached", "act on this machine" in sent[0]["system"])
+        # it has to survive all the way into the payload, not just the template
+        check("the time reaches the prompt the Bit actually gets",
+              str(__import__("datetime").datetime.now().year) in sent[0]["system"]
+              and "in the " in sent[0]["system"])
 
         sent.clear()
         saved = dict(tools.TOOLS)
