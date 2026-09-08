@@ -145,8 +145,12 @@ class Desk:
         self.flash_until = 0
         self.pulse = 0
         self.strip_top = 146   # set by draw_idle; the touch chain reads it
-        self._ip = ""          # the address on a real network, cached
-        self._ip_at = 0
+        # Setting a computer up is a thing that finishes. START is how the
+        # board is told it has: nothing is listening for that press until
+        # the Bits are installed and running on the far end.
+        self.setup_done = False
+        self._net = ("", "")   # (network, address), cached
+        self._net_at = 0
         self.ticks = 0          # main-loop counter, so a stall is visible
 
     def lamp(self, r=False, g=False, b=False):
@@ -157,23 +161,49 @@ class Desk:
     def colour_of(self, name):
         return self.d.rgb(*PALETTE.get(name, (200, 190, 175)))
 
-    def station_ip(self):
-        """The board's address on a real network, once it has joined one.
+    def station(self):
+        """(network joined, address on it), or ("", "") if it has joined none.
 
         Cached for a few seconds: this is read while drawing, and the screen
         redraws on every message that arrives.
         """
         now = time.ticks_ms()
-        if self._ip_at and time.ticks_diff(now, self._ip_at) < 5000:
-            return self._ip
-        self._ip_at = now
+        if self._net_at and time.ticks_diff(now, self._net_at) < 5000:
+            return self._net
+        self._net_at = now
         try:
             import network
             w = network.WLAN(network.STA_IF)
-            self._ip = w.ifconfig()[0] if w.active() and w.isconnected() else ""
+            if w.active() and w.isconnected():
+                try:
+                    ssid = w.config("essid")
+                except Exception:
+                    ssid = ""
+                self._net = (ssid, w.ifconfig()[0])
+            else:
+                self._net = ("", "")
         except Exception:
-            self._ip = ""
-        return self._ip
+            self._net = ("", "")
+        return self._net
+
+    def station_ip(self):
+        return self.station()[1]
+
+    def joined(self, st=None):
+        """The portal has just put the board on a network.
+
+        Called from the web server's thread the moment somebody submits the
+        form. Without it the screen went on showing the access point and the
+        setup address for as long as it was left alone: the board knew it had
+        moved and the person standing in front of it did not, which is the one
+        moment they need the new address.
+        """
+        self._net_at = 0                 # forget what was cached
+        try:
+            self.station()               # and look it up now
+        except Exception:
+            pass
+        self.dirty = True
 
     def draw(self):
         self.dirty = False
@@ -233,12 +263,36 @@ class Desk:
         d.fill(third, 208, 1, 32, self.INK)
         d.fill(2 * third, 208, 1, 32, self.INK)
 
-    # Where the strip begins. It is taller while the access point is up,
-    # because that is when it has three things to say, and a press has to mean
-    # what it looks like it means - so this decides the touch boundary too,
-    # rather than the two being written down separately and drifting.
+    def strip_lines(self):
+        """What the strip has to say, as (text, colour).
+
+        All of it is about setting a computer up, so all of it stops at the
+        first START: that press is somebody telling the board the machine in
+        front of it is already running the Bits.
+        """
+        ssid, ip = self.station()
+        if self.setup_done:
+            out = []
+        elif ip:
+            # joined. The network and the address are what is wanted now; the
+            # password is not, and putting it up once it is spent is just
+            # leaving it on a screen.
+            out = [("On: " + ssid, self.GOLD), ("IP: " + ip, self.PAPER)]
+            if self.ap_live:
+                out.append(("Setup: %s / %s" % (P_NAME, self.ap_live), self.DIM))
+        elif self.ap_live:
+            out = [("SSID: " + P_NAME, self.GOLD),
+                   ("Password: " + P_PASS, self.PAPER),
+                   ("Webpage: " + self.ap_live, self.PAPER)]
+        else:
+            out = []
+        return [(t[:COLS], c) for t, c in out]
+
+    # Where the strip begins. It is as tall as it needs to be, and a press has
+    # to mean what it looks like it means - so this decides the touch boundary
+    # too, rather than the two being written down separately and drifting.
     def strip_at(self):
-        return 126 if self.ap_live else 146
+        return {3: 126, 2: 140}.get(len(self.strip_lines()), 146)
 
     def draw_idle(self):
         d = self.d
@@ -285,21 +339,16 @@ class Desk:
         # to ask for it with, which is the entire problem being solved.
         strip = d.rgb(42, 30, 36)
         d.fill(0, self.strip_top, T.W, 172 - self.strip_top, strip)
-        # Three lines, because a bare computer needs the network, the password
-        # for it and the address to open, and no two of those are any use
-        # without the third. It has to be legible without pressing anything:
-        # the machine being set up has no way of being told any of it.
-        if self.ap_live:
-            y = self.strip_top + 3
-            for text, ink in (("SSID: " + P_NAME, self.GOLD),
-                              ("Password: " + P_PASS, self.PAPER),
-                              ("Webpage: " + self.ap_live, self.PAPER)):
-                d.text(text[:COLS], 8, y, ink, strip)
+        # A bare computer needs the network, the password for it and the
+        # address to open, and no two of those are any use without the third.
+        # It has to be legible without pressing anything: the machine being
+        # set up has no way of being told any of it.
+        rows = self.strip_lines()
+        if rows:
+            y = self.strip_top + 3 + (6 if len(rows) == 2 else 0)
+            for text, ink in rows:
+                d.text(text, 8, y, ink, strip)
                 y += 14
-        elif self.station_ip():
-            # set up, and on a real network: the address it can be reached at
-            d.text(("IP: " + self.station_ip())[:COLS], 8, 150,
-                   self.GOLD, strip)
         else:
             # Both ends of one line, and they must not meet in the middle. The
             # right-hand label used to be placed as though it were always
@@ -389,7 +438,7 @@ class Desk:
                 self.busy("starting the access point...")
             self.ap_live = P.start_ap()
             import _thread
-            _thread.start_new_thread(P.serve, ())
+            _thread.start_new_thread(P.serve, (self.joined,))
         except Exception as e:
             self.ap = self.ap_live = ""
             if show:
@@ -623,6 +672,7 @@ class Desk:
             # it settles the question the access point was there to ask, and
             # the radio can go down. A power cycle brings it back, which is
             # the case that matters: a board carried to a bare machine.
+            self.setup_done = True
             if self.ap_live:
                 self.portal(False)
 
