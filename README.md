@@ -10,6 +10,16 @@ implies. The Reaper can audit your disk and kill processes; he cannot touch your
 calendar. The Secretary owns the calendar; she cannot delete anything. If two
 Bits could plausibly own a job, the job is split wrong.
 
+<p align="center">
+  <img src="docs/images/bit_wizard.png" height="260" alt="The Wizard: a pixel-art wizard in a blue starry robe and pointed hat">
+  <img src="docs/images/bit_reaper.png" height="260" alt="The Reaper: a hooded pixel-art skeleton holding a scythe">
+  <img src="docs/images/bit_coder.png" height="260" alt="The Coder: a pixel-art programmer with glasses at a desk and monitor">
+</p>
+
+<p align="center">
+  <img src="docs/images/bits_crew.png" width="100%" alt="All nine Bits side by side in their frames: Boss, Coder, Courier, Investigator, Reaper, Secretary, Wizard, Ghost and Librarian">
+</p>
+
 ![The roster](Preview/bits-preview.png)
 
 ## The roster
